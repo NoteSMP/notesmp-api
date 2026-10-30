@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "notesmp-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-30",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "notesmp-data",
+      "database_id": "2fa4bdb1-faf0-432b-8b42-5f02c2cfdea3"
+    }
+  ]
+}
