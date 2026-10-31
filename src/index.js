@@ -42,7 +42,9 @@ export default {
         const allowed = ["gallery","events","buildings","places","inprogress","rules","updates"];
         const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50,1),100);
         let result;
-        if (category && allowed.includes(category)) {
+        if (category === "gallery" && url.searchParams.get("group")) {
+          result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='gallery' AND group_name=? ORDER BY published_at DESC LIMIT ?").bind(url.searchParams.get("group"),limit).all();
+        } else if (category && allowed.includes(category)) {
           result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category=? ORDER BY published_at DESC LIMIT ?").bind(category,limit).all();
         } else {
           result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category IN ('gallery','events','buildings','places','inprogress','rules','updates') ORDER BY published_at DESC LIMIT ?").bind(limit).all();
