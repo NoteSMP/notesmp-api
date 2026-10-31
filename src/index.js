@@ -58,7 +58,7 @@ export default {
           try { images=JSON.parse(row.image_urls_json || "[]"); } catch {}
           try { event=row.event_data_json ? JSON.parse(row.event_data_json) : null; } catch {}
           if (!event && row.category === "gallery" && row.group_name === "events") event = { scheduledStartTime: row.published_at, galleryGroup: "events" };
-          return { id:row.six_digit_id,category:row.category,group:row.group_name,title:row.title,subtitle:row.subtitle,body:row.body,images,event,authorMinecraftName:row.linked_minecraft_name,publishedAt:row.published_at,updatedAt:row.updated_at };
+          return { id:row.six_digit_id,category:row.category === "gallery" ? row.group_name : row.category,group:row.group_name,title:row.title,subtitle:row.subtitle,body:row.body,images,event,authorMinecraftName:row.linked_minecraft_name,publishedAt:row.published_at,updatedAt:row.updated_at };
         });
         return json({posts});
       }
