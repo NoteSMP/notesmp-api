@@ -36,6 +36,46 @@ export default {
         return json({ ok: true, service: "notesmp-api", database: "connected" });
       }
 
+
+      if (request.method === "GET" && path === "/v1/content/posts") {
+        const category = url.searchParams.get("category");
+        const allowed = ["gallery","events","buildings","places","inprogress","rules","updates"];
+        const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50,1),100);
+        let result;
+        if (category && allowed.includes(category)) {
+          result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category=? ORDER BY published_at DESC LIMIT ?").bind(category,limit).all();
+        } else {
+          result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category IN ('gallery','events','buildings','places','inprogress','rules','updates') ORDER BY published_at DESC LIMIT ?").bind(limit).all();
+        }
+        const posts = (result.results || []).map(row => {
+          let images=[]; let event=null;
+          try { images=JSON.parse(row.image_urls_json || "[]"); } catch {}
+          try { event=row.event_data_json ? JSON.parse(row.event_data_json) : null; } catch {}
+          return { id:row.six_digit_id,category:row.category,group:row.group_name,title:row.title,subtitle:row.subtitle,body:row.body,images,event,authorMinecraftName:row.linked_minecraft_name,publishedAt:row.published_at,updatedAt:row.updated_at };
+        });
+        return json({posts});
+      }
+
+      const postMatch = path.match(/^\/v1\/content\/posts\/(\d{6})$/);
+      if (request.method === "GET" && postMatch) {
+        const row = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE six_digit_id=?").bind(postMatch[1]).first();
+        if (!row) return json({error:"Post not found"},404);
+        let images=[]; let event=null;
+        try { images=JSON.parse(row.image_urls_json || "[]"); } catch {}
+        try { event=row.event_data_json ? JSON.parse(row.event_data_json) : null; } catch {}
+        return json({post:{id:row.six_digit_id,category:row.category,group:row.group_name,title:row.title,subtitle:row.subtitle,body:row.body,images,event,authorMinecraftName:row.linked_minecraft_name,publishedAt:row.published_at,updatedAt:row.updated_at}});
+      }
+
+      if (request.method === "GET" && path === "/v1/content/links") {
+        const result = await env.DB.prepare("SELECT link_key,url,updated_at FROM website_links ORDER BY link_key").all();
+        return json({links:result.results || []});
+      }
+
+      if (request.method === "GET" && path === "/v1/creators") {
+        const result = await env.DB.prepare("SELECT twitch_login,live_started_at,live_title,live_url,live_thumbnail_url FROM creators ORDER BY CASE WHEN live_title IS NULL THEN 1 ELSE 0 END, live_started_at DESC, twitch_login COLLATE NOCASE").all();
+        return json({creators:(result.results || []).map(row=>({...row,live:Boolean(row.live_title)}))});
+      }
+
       if (request.method === "GET" && path === "/v1/server") {
         const row = await env.DB.prepare(
           "SELECT online, players_online, max_players, motd, version, online_players_json, updated_at FROM server_state WHERE id = 1"
