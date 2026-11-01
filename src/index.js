@@ -38,6 +38,7 @@ export default {
 
 
       if (request.method === "GET" && path === "/v1/content/posts") {
+        await env.DB.prepare("DELETE FROM published_posts WHERE category='news' AND json_extract(event_data_json,'$.type')='maintenance' AND julianday(json_extract(event_data_json,'$.expiryAt')) <= julianday('now')").run();
         const category = url.searchParams.get("category");
         const allowed = ["gallery","events","buildings","places","inprogress","rules","updates","news"];
         const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50,1),100);
