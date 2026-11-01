@@ -87,7 +87,7 @@ export default {
       }
 
       if (request.method === "GET" && path === "/v1/creators") {
-        const result = await env.DB.prepare("SELECT c.twitch_login,(SELECT value FROM bot_config WHERE key='twitch_avatar_' || c.twitch_login) AS avatar_url,c.live_started_at,c.live_title,c.live_url,c.live_thumbnail_url FROM creators c ORDER BY CASE WHEN c.live_title IS NULL THEN 1 ELSE 0 END,c.live_started_at DESC,c.twitch_login COLLATE NOCASE").all();
+        const result = await env.DB.prepare("SELECT c.twitch_login,c.created_at,(SELECT value FROM bot_config WHERE key='twitch_avatar_' || c.twitch_login) AS avatar_url,c.live_started_at,c.live_title,c.live_url,c.live_thumbnail_url FROM creators c ORDER BY CASE WHEN c.live_title IS NOT NULL AND lower(c.live_title) LIKE '%notesmp%' THEN 0 WHEN c.live_title IS NOT NULL THEN 1 ELSE 2 END,CASE WHEN c.live_title IS NOT NULL AND lower(c.live_title) LIKE '%notesmp%' THEN c.live_started_at END DESC,c.created_at ASC,c.twitch_login COLLATE NOCASE").all();
         return json({creators:(result.results || []).map(row=>({...row,live:Boolean(row.live_title)}))});
       }
 
