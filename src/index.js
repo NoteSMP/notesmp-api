@@ -53,7 +53,15 @@ export default {
         } else {
           result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category IN ('gallery','events','buildings','places','inprogress','rules','updates') ORDER BY published_at DESC LIMIT ?").bind(limit).all();
         }
-        const posts = (result.results || []).map(row => {
+        const rows = (result.results || []).filter(row => {
+          if (row.category !== "news") return true;
+          try {
+            const news = row.event_data_json ? JSON.parse(row.event_data_json) : null;
+            const expiry = news?.type === "maintenance" ? Date.parse(news.expiryAt || "") : NaN;
+            return !Number.isFinite(expiry) || expiry > Date.now();
+          } catch { return true; }
+        });
+        const posts = rows.map(row => {
           let images=[]; let event=null;
           try { images=JSON.parse(row.image_urls_json || "[]"); } catch {}
           try { event=row.event_data_json ? JSON.parse(row.event_data_json) : null; } catch {}
