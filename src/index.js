@@ -39,7 +39,7 @@ export default {
 
       if (request.method === "GET" && path === "/v1/content/posts") {
         const category = url.searchParams.get("category");
-        const allowed = ["gallery","events","buildings","places","inprogress","rules","updates"];
+        const allowed = ["gallery","events","buildings","places","inprogress","rules","updates","news"];
         const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50,1),100);
         let result;
         if (category === "events") {
