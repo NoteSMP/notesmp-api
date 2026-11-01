@@ -43,7 +43,9 @@ export default {
         const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50,1),100);
         let result;
         if (category === "events") {
-          result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='events' OR (category='gallery' AND group_name='events') ORDER BY published_at DESC LIMIT ?").bind(limit).all();
+          result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='events' ORDER BY published_at DESC LIMIT ?").bind(limit).all();
+        } else if (category === "gallery" && url.searchParams.get("group")) {
+          result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='gallery' AND lower(group_name)=lower(?) ORDER BY published_at DESC LIMIT ?").bind(url.searchParams.get("group"),limit).all();
         } else if (["buildings","places","inprogress"].includes(category)) {
           result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='gallery' AND group_name=? ORDER BY published_at DESC LIMIT ?").bind(category,limit).all();
         } else if (category === "gallery" && url.searchParams.get("group")) {
@@ -57,7 +59,6 @@ export default {
           let images=[]; let event=null;
           try { images=JSON.parse(row.image_urls_json || "[]"); } catch {}
           try { event=row.event_data_json ? JSON.parse(row.event_data_json) : null; } catch {}
-          if (!event && row.category === "gallery" && row.group_name === "events") event = { scheduledStartTime: row.published_at, galleryGroup: "events" };
           return { id:row.six_digit_id,category:row.category === "gallery" ? row.group_name : row.category,group:row.group_name,title:row.title,subtitle:row.subtitle,body:row.body,images,event,dimension:event?.dimension || null,coordinates:event?.coordinates || null,authorMinecraftName:row.linked_minecraft_name,publishedAt:row.published_at,updatedAt:row.updated_at };
         });
         return json({posts});
