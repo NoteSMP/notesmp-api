@@ -57,11 +57,11 @@ export default {
           result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category IN ('gallery','events','buildings','places','inprogress','rules','updates') ORDER BY published_at DESC LIMIT ?").bind(limit).all();
         }
         const requestedGalleryGroup = category === "gallery" && url.searchParams.get("group")
-          ? String(url.searchParams.get("group")).toLowerCase().replace(/[\\s_-]/g, "")
+          ? String(url.searchParams.get("group")).toLowerCase().replace(/[\s_-]+/g, "")
           : "";
         const rows = (result.results || []).filter(row => {
           if (requestedGalleryGroup) {
-            const storedGroup = String(row.group_name || "").toLowerCase().replace(/[\\s_-]/g, "");
+            const storedGroup = String(row.group_name || "").toLowerCase().replace(/[\s_-]+/g, "");
             return row.category === "gallery" && storedGroup === requestedGalleryGroup;
           }
           if (row.category !== "news") return true;
