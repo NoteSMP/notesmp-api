@@ -46,8 +46,9 @@ export default {
         if (category === "events") {
           result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='events' ORDER BY published_at DESC LIMIT ?").bind(limit).all();
         } else if (category === "gallery" && url.searchParams.get("group")) {
-          const normalizedGroup = String(url.searchParams.get("group")).toLowerCase().replace(/[\\s_-]/g, "");
-          result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE (category='gallery' AND lower(replace(replace(replace(trim(group_name),' ',''),'-',''),'_',''))=?) OR (lower(replace(replace(replace(trim(category),' ',''),'-',''),'_',''))=? AND category!='gallery') ORDER BY published_at DESC LIMIT ?").bind(normalizedGroup,normalizedGroup,limit).all();
+          // Load gallery entries plus legacy rows, then normalize labels consistently in JS.
+          // SQL string normalization had become brittle across stored group/category variants.
+          result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='gallery' OR category IN ('events','buildings','places','inprogress') ORDER BY published_at DESC LIMIT 100").all();
         } else if (["buildings","places","inprogress"].includes(category)) {
           result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='gallery' AND group_name=? ORDER BY published_at DESC LIMIT ?").bind(category,limit).all();
         } else if (category && allowed.includes(category)) {
@@ -55,7 +56,16 @@ export default {
         } else {
           result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category IN ('gallery','events','buildings','places','inprogress','rules','updates') ORDER BY published_at DESC LIMIT ?").bind(limit).all();
         }
+        const requestedGalleryGroup = category === "gallery" && url.searchParams.get("group")
+          ? String(url.searchParams.get("group")).toLowerCase().replace(/[\\s_-]/g, "")
+          : "";
         const rows = (result.results || []).filter(row => {
+          if (requestedGalleryGroup) {
+            const storedGroup = String(row.group_name || "").toLowerCase().replace(/[\\s_-]/g, "");
+            const storedCategory = String(row.category || "").toLowerCase().replace(/[\\s_-]/g, "");
+            if (row.category === "gallery") return storedGroup === requestedGalleryGroup;
+            return storedCategory === requestedGalleryGroup;
+          }
           if (row.category !== "news") return true;
           try {
             const news = row.event_data_json ? JSON.parse(row.event_data_json) : null;
