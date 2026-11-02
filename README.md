@@ -1,30 +1,74 @@
 # NoteSMP API
 
-This is a separate Cloudflare Worker API. It does not replace the existing website Worker.
+Cloudflare Worker API used by the NoteSMP website, Discord bot, and Minecraft server integration.
 
-## Planned deployment
+## Components
 
-- Worker name: `notesmp-api`
-- Database: Cloudflare D1 named `notesmp-data`
-- D1 binding: `DB`
-- Public API hostname: `api.notesmp.de` (connect only after deployment)
-- Website origin: `https://www.notesmp.de`
+- **Runtime:** Cloudflare Workers
+- **Database:** Cloudflare D1, binding `DB`, database `notesmp-data`
+- **Source:** `src/index.js`
+- **Schema:** `schema.sql`
 
-## Endpoints
+## Configure and deploy
 
-- `GET /v1/health` — checks API and D1 connectivity.
-- `GET /v1/server` — latest server heartbeat.
-- `GET /v1/players` — public player leaderboard (up to 100).
-- `GET /v1/players/:uuid` — public player profile.
-- `POST /v1/minecraft/heartbeat` — protected Minecraft server heartbeat.
-- `POST /v1/minecraft/offline` — protected server shutdown notification.
+1. Confirm the D1 database binding in `wrangler.jsonc` points to the intended database.
+2. Apply `schema.sql` to the D1 database.
+3. Configure the Worker secret `MINECRAFT_API_KEY`. The Paper plugin and protected integration calls must send it as a Bearer token.
+4. Deploy with Wrangler or the configured Cloudflare deployment pipeline.
 
-## Secrets
+```bash
+npm install --save-dev wrangler
+npx wrangler login
+npx wrangler dev
+npx wrangler deploy
+```
 
-Set `MINECRAFT_API_KEY` as a Worker secret. Never put it in the website, GitHub, or a public config file. The Paper plugin will use it in an Authorization Bearer header.
+Do not expose `MINECRAFT_API_KEY` in the website, public source, client-side JavaScript, or commit history.
 
-## Database
+## Public endpoints
 
-Create the D1 database, then run `api/schema.sql` against the remote database. The Worker must have a D1 binding named `DB`.
+Base URL: the deployed API Worker URL (for example, the configured `NOTESMP_API_URL`).
 
-Do not deploy until a real database ID has been added to the Wrangler configuration. Never commit API keys or other secrets.
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/v1/health` | Checks API/D1 connectivity. |
+| GET | `/v1/content/posts` | Lists published content. Optional query parameters: `category`, `group` (for gallery group), and `limit` (1–100). |
+| GET | `/v1/content/posts/:sixDigitId` | Fetches one published post by its six-digit ID. |
+| GET | `/v1/content/links` | Returns website links. |
+| GET | `/v1/creators` | Returns creators and their current Twitch live metadata. |
+| GET | `/v1/server` | Returns the latest server online state, player counts, MOTD, version, online player list, and update time. |
+| GET | `/v1/players` | Lists public player records. Optional `limit` (1–100). |
+| GET | `/v1/players/:uuid` | Fetches a public player profile by UUID. |
+
+## Protected Minecraft endpoints
+
+These endpoints require `Authorization: Bearer <MINECRAFT_API_KEY>`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/v1/minecraft/heartbeat` | Stores server online status, counts, MOTD, version, and online player names. |
+| POST | `/v1/minecraft/offline` | Marks the server offline and clears the current online-player list. |
+
+Heartbeat JSON should include `playersOnline` and `maxPlayers` as valid integer counts. Optional fields include `motd`, `version`, and `onlinePlayers`.
+
+Example:
+
+```bash
+curl -X POST "$NOTESMP_API_URL/v1/minecraft/heartbeat" \
+  -H "Authorization: Bearer $MINECRAFT_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"playersOnline":1,"maxPlayers":20,"motd":"NoteSMP","version":"Java","onlinePlayers":["ExamplePlayer"]}'
+```
+
+## Minecraft data ingestion
+
+The API also contains protected plugin-facing routes for account verification and player-stat ingestion:
+
+- `POST /minecraft/verify` — consumes a pending verification code and links the Discord account to the Minecraft UUID/name.
+- `POST /minecraft/playerstats` — upserts the player's base stats and statistic key/value data.
+
+Both require the same Bearer API key. See the route handlers in `src/index.js` for exact payload validation.
+
+## CORS and errors
+
+The API responds to preflight `OPTIONS` requests and allows cross-origin browser requests. JSON errors include an `error` field; common statuses include 400 (invalid input), 401 (missing/invalid API key), 404 (unknown resource/route), and 500 (unexpected server error).
