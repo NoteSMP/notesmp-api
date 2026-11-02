@@ -46,9 +46,9 @@ export default {
         if (category === "events") {
           result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='events' ORDER BY published_at DESC LIMIT ?").bind(limit).all();
         } else if (category === "gallery" && url.searchParams.get("group")) {
-          // Load gallery entries plus legacy rows, then normalize labels consistently in JS.
-          // SQL string normalization had become brittle across stored group/category variants.
-          result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='gallery' OR category IN ('events','buildings','places','inprogress') ORDER BY published_at DESC LIMIT 100").all();
+          // Gallery groups are strictly gallery records. Never mix Discord calendar events
+          // into the Gallery tab, even when the selected gallery group is named "Events".
+          result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='gallery' ORDER BY published_at DESC LIMIT ?").bind(limit).all();
         } else if (["buildings","places","inprogress"].includes(category)) {
           result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='gallery' AND group_name=? ORDER BY published_at DESC LIMIT ?").bind(category,limit).all();
         } else if (category && allowed.includes(category)) {
@@ -62,9 +62,7 @@ export default {
         const rows = (result.results || []).filter(row => {
           if (requestedGalleryGroup) {
             const storedGroup = String(row.group_name || "").toLowerCase().replace(/[\\s_-]/g, "");
-            const storedCategory = String(row.category || "").toLowerCase().replace(/[\\s_-]/g, "");
-            if (row.category === "gallery") return storedGroup === requestedGalleryGroup;
-            return storedCategory === requestedGalleryGroup;
+            return row.category === "gallery" && storedGroup === requestedGalleryGroup;
           }
           if (row.category !== "news") return true;
           try {
