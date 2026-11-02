@@ -81,6 +81,12 @@ export default {
         return json({post:{id:row.six_digit_id,category:row.category === "gallery" ? row.group_name : row.category,group:row.group_name,title:row.title,subtitle:row.subtitle,body:row.body,images,event,dimension:event?.dimension || null,coordinates:event?.coordinates || null,authorMinecraftName:row.linked_minecraft_name,publishedAt:row.published_at,updatedAt:row.updated_at}});
       }
 
+      if (request.method === "GET" && path === "/v1/content/hero") {
+        const rows = await env.DB.prepare("SELECT key,value FROM bot_config WHERE key IN ('info_hero_title','info_hero_subtitle')").all();
+        const values = Object.fromEntries((rows.results || []).map(row => [row.key,row.value]));
+        return json({ title: values.info_hero_title || "Your world. Your people.", subtitle: values.info_hero_subtitle || "Everything happening on NoteSMP, in one place. Check the server, find your next event, and see what the community is building." });
+      }
+
       if (request.method === "GET" && path === "/v1/content/links") {
         const result = await env.DB.prepare("SELECT link_key,url,updated_at FROM website_links ORDER BY link_key").all();
         return json({links:result.results || []});
