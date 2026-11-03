@@ -140,10 +140,30 @@ export default {
         return player ? json({ player }) : json({ error: "Player not found" }, 404);
       }
 
+      const advancementsMatch = path.match(/^\/v1\/players\/([0-9a-fA-F-]{36})\/advancements$/);
+      if (request.method === "GET" && advancementsMatch) {
+        const result = await env.DB.prepare("SELECT advancement_id, advancement_title, earned_at FROM player_advancements WHERE minecraft_uuid = ? ORDER BY earned_at DESC, advancement_id").bind(advancementsMatch[1]).all();
+        return json({ advancements: result.results || [] });
+      }
+
       const statsMatch = path.match(/^\/v1\/players\/([0-9a-fA-F-]{36})\/statistics$/);
       if (request.method === "GET" && statsMatch) {
         const result = await env.DB.prepare("SELECT stat_id, stat_value, updated_at FROM player_statistics WHERE minecraft_uuid = ? ORDER BY stat_id").bind(statsMatch[1]).all();
         return json({ statistics: result.results || [] });
+      }
+
+      if (request.method === "POST" && path === "/v1/minecraft/advancement") {
+        if (!requireServerKey(request, env)) return unauthorized();
+        const body = await request.json();
+        const uuid = typeof body.uuid === "string" ? body.uuid : "";
+        const username = typeof body.username === "string" ? body.username.slice(0, 16) : "";
+        const advancementId = typeof body.advancementId === "string" ? body.advancementId.slice(0, 180) : "";
+        const title = typeof body.title === "string" ? body.title.slice(0, 180) : advancementId;
+        const earnedAt = typeof body.earnedAt === "string" ? body.earnedAt : new Date().toISOString();
+        if (!/^[0-9a-fA-F-]{36}$/.test(uuid) || !username || !advancementId) return json({ error: "Invalid advancement payload" }, 400);
+        await env.DB.prepare("INSERT INTO players (uuid, username, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(uuid) DO UPDATE SET username=excluded.username, updated_at=CURRENT_TIMESTAMP").bind(uuid, username).run();
+        await env.DB.prepare("INSERT INTO player_advancements (minecraft_uuid, advancement_id, advancement_title, earned_at) VALUES (?, ?, ?, ?) ON CONFLICT(minecraft_uuid, advancement_id) DO UPDATE SET advancement_title=excluded.advancement_title, earned_at=excluded.earned_at").bind(uuid, advancementId, title, earnedAt).run();
+        return json({ ok: true });
       }
 
       if (request.method === "POST" && path === "/v1/minecraft/heartbeat") {
