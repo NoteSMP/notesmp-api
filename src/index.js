@@ -156,6 +156,21 @@ export default {
         return json({ statistics: result.results || [] });
       }
 
+      if (request.method === "POST" && path === "/v1/minecraft/advancements") {
+        if (!requireServerKey(request, env)) return unauthorized();
+        const body = await request.json();
+        const uuid = typeof body.uuid === "string" ? body.uuid : "";
+        const username = typeof body.username === "string" ? body.username.slice(0, 16) : "";
+        const advancements = Array.isArray(body.advancements) ? body.advancements.slice(0, 5000) : [];
+        if (!/^[0-9a-fA-F-]{36}$/.test(uuid) || !username) return json({ error: "Invalid advancement payload" }, 400);
+        await env.DB.prepare("INSERT INTO players (uuid, username, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(uuid) DO UPDATE SET username=excluded.username, updated_at=CURRENT_TIMESTAMP").bind(uuid, username).run();
+        const statements = advancements.filter(item => item && typeof item.advancementId === "string" && item.advancementId.length <= 180)
+          .map(item => env.DB.prepare("INSERT INTO player_advancements (minecraft_uuid, advancement_id, advancement_title, earned_at) VALUES (?, ?, ?, ?) ON CONFLICT(minecraft_uuid, advancement_id) DO UPDATE SET advancement_title=excluded.advancement_title, earned_at=excluded.earned_at")
+            .bind(uuid, item.advancementId, typeof item.title === "string" ? item.title.slice(0, 180) : item.advancementId, typeof item.earnedAt === "string" ? item.earnedAt : new Date().toISOString()));
+        for (let i = 0; i < statements.length; i += 100) await env.DB.batch(statements.slice(i, i + 100));
+        return json({ ok: true, advancementsStored: statements.length });
+      }
+
       if (request.method === "POST" && path === "/v1/minecraft/advancement") {
         if (!requireServerKey(request, env)) return unauthorized();
         const body = await request.json();
