@@ -140,7 +140,7 @@ export default {
         return player ? json({ player }) : json({ error: "Player not found" }, 404);
       }
 
-      const statsMatch = path.match(/^\\/v1\\/players\\/([0-9a-fA-F-]{36})\\/statistics$/);
+      const statsMatch = path.match(/^\/v1\/players\/([0-9a-fA-F-]{36})\/statistics$/);
       if (request.method === "GET" && statsMatch) {
         const result = await env.DB.prepare("SELECT stat_id, stat_value, updated_at FROM player_statistics WHERE minecraft_uuid = ? ORDER BY stat_id").bind(statsMatch[1]).all();
         return json({ statistics: result.results || [] });
