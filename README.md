@@ -70,7 +70,8 @@ The API also contains protected plugin-facing routes for account verification an
 
 - `POST /minecraft/verify` — consumes a pending verification code and links the Discord account to the Minecraft UUID/name.
 - `POST /minecraft/playerstats` — upserts the player's base stats and statistic key/value data.
-- `POST /v1/minecraft/advancement` — records an earned Minecraft advancement.
+- `POST /v1/minecraft/advancement` — records one newly earned Minecraft advancement.
+- `POST /v1/minecraft/advancements` — upserts a batch of earned advancements to backfill a player's history.
 
 Both require the same Bearer API key. See the route handlers in `src/index.js` for exact payload validation.
 
