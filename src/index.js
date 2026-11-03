@@ -45,6 +45,10 @@ export default {
         let result;
         if (category === "events") {
           result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='events' ORDER BY published_at DESC LIMIT ?").bind(limit).all();
+        } else if (category === "gallery" && url.searchParams.get("builder")) {
+          const builder = url.searchParams.get("builder").trim().slice(0, 16);
+          const builderLimit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 1000);
+          result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='gallery' AND lower(COALESCE(linked_minecraft_name,'')) LIKE '%' || lower(?) || '%' ORDER BY published_at DESC LIMIT ?").bind(builder, builderLimit).all();
         } else if (category === "gallery" && url.searchParams.get("group")) {
           // Gallery groups are strictly gallery records. Never mix Discord calendar events
           // into the Gallery tab, even when the selected gallery group is named "Events".
