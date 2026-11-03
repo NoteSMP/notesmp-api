@@ -13,8 +13,9 @@ Cloudflare Worker API used by the NoteSMP website, Discord bot, and Minecraft se
 
 1. Confirm the D1 database binding in `wrangler.jsonc` points to the intended database.
 2. Apply `schema.sql` to the D1 database.
-3. Configure the Worker secret `MINECRAFT_API_KEY`. The Paper plugin and protected integration calls must send it as a Bearer token.
-4. Deploy with Wrangler or the configured Cloudflare deployment pipeline.
+3. For incremental database changes, apply the matching SQL migration to the same D1 database (advancements: `npx wrangler d1 execute notesmp-data --remote --file=migrations/0002_player_advancements.sql`).
+4. Configure the Worker secret `MINECRAFT_API_KEY`. The Paper plugin and protected integration calls must send it as a Bearer token.
+5. Deploy with Wrangler or the configured Cloudflare deployment pipeline.
 
 ```bash
 npm install --save-dev wrangler
@@ -39,6 +40,9 @@ Base URL: the deployed API Worker URL (for example, the configured `NOTESMP_API_
 | GET | `/v1/server` | Returns the latest server online state, player counts, MOTD, version, online player list, and update time. |
 | GET | `/v1/players` | Lists public player records. Optional `limit` (1–100). |
 | GET | `/v1/players/:uuid` | Fetches a public player profile by UUID. |
+| GET | `/v1/players/:uuid/statistics` | Returns the player's recorded statistics. |
+| GET | `/v1/players/:uuid/advancements` | Returns the player's earned advancement history. |
+| GET | `/v1/content/posts?category=gallery&builder=:name` | Lists gallery posts attributed to a builder name. |
 
 ## Protected Minecraft endpoints
 
@@ -66,6 +70,7 @@ The API also contains protected plugin-facing routes for account verification an
 
 - `POST /minecraft/verify` — consumes a pending verification code and links the Discord account to the Minecraft UUID/name.
 - `POST /minecraft/playerstats` — upserts the player's base stats and statistic key/value data.
+- `POST /v1/minecraft/advancement` — records an earned Minecraft advancement.
 
 Both require the same Bearer API key. See the route handlers in `src/index.js` for exact payload validation.
 
