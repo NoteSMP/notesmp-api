@@ -209,6 +209,7 @@ export default {
         const advancements = Array.isArray(body.advancements) ? body.advancements.slice(0, 5000) : [];
         if (!/^[0-9a-fA-F-]{36}$/.test(uuid) || !username) return json({ error: "Invalid advancement payload" }, 400);
         await env.DB.prepare("INSERT INTO players (uuid, username, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(uuid) DO UPDATE SET username=excluded.username, updated_at=CURRENT_TIMESTAMP").bind(uuid, username).run();
+        // The plugin sends the complete earned set during reconciliation; remove stale DB entries first.\n        await env.DB.prepare("DELETE FROM player_advancements WHERE minecraft_uuid=?").bind(uuid).run();
         const statements = advancements.filter(item => item && typeof item.advancementId === "string" && item.advancementId.length <= 180)
           .map(item => env.DB.prepare("INSERT INTO player_advancements (minecraft_uuid, advancement_id, advancement_title, earned_at) VALUES (?, ?, ?, ?) ON CONFLICT(minecraft_uuid, advancement_id) DO UPDATE SET advancement_title=excluded.advancement_title, earned_at=excluded.earned_at")
             .bind(uuid, item.advancementId, typeof item.title === "string" ? item.title.slice(0, 180) : item.advancementId, typeof item.earnedAt === "string" ? item.earnedAt : new Date().toISOString()));
