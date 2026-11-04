@@ -182,7 +182,7 @@ export default {
         return json({ ok: true, statsStored: stats.length });
       }
 
-      const statsMatch = path.match(/^\\/v1\\/players\\/([0-9a-fA-F-]{36})\\/statistics$/);
+      const statsMatch = path.match(/^\/v1\/players\/([0-9a-fA-F-]{36})\/statistics$/);
       if (request.method === "GET" && statsMatch) {
         const uuid = statsMatch[1];
         if (url.searchParams.get("refresh") === "1") {
