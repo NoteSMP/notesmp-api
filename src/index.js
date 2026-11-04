@@ -175,7 +175,7 @@ export default {
           : [];
         const statements = stats.map(([statId,value]) => env.DB.prepare("INSERT INTO player_statistics(minecraft_uuid,stat_id,stat_value) VALUES(?,?,?) ON CONFLICT(minecraft_uuid,stat_id) DO UPDATE SET stat_value=excluded.stat_value,updated_at=CURRENT_TIMESTAMP").bind(uuid,statId,Number(value)));
         for (let i = 0; i < statements.length; i += 100) await env.DB.batch(statements.slice(i, i + 100));
-        await env.DB.prepare("DELETE FROM stats_refresh_queue WHERE uuid=?").bind(uuid).run();
+        await env.DB.prepare("UPDATE stats_refresh_queue SET status='done', claimed_at=NULL WHERE uuid=?").bind(uuid).run();
         return json({ ok: true, statsStored: stats.length });
       }
 
