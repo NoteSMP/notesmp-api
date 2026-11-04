@@ -150,9 +150,45 @@ export default {
         return json({ advancements: result.results || [] });
       }
 
+
+      if (request.method === "GET" && path === "/v1/minecraft/stats-request") {
+        if (!requireServerKey(request, env)) return unauthorized();
+        const row = await env.DB.prepare("SELECT uuid, username FROM stats_refresh_queue WHERE status='pending' ORDER BY requested_at LIMIT 1").first();
+        if (!row) return json({ request: null });
+        await env.DB.prepare("UPDATE stats_refresh_queue SET status='processing', claimed_at=CURRENT_TIMESTAMP WHERE uuid=? AND status='pending'").bind(row.uuid).run();
+        return json({ request: row });
+      }
+
+      if (request.method === "POST" && path === "/v1/minecraft/playerstats") {
+        if (!requireServerKey(request, env)) return unauthorized();
+        let payload; try { payload = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
+        const uuid = typeof payload.uuid === "string" ? payload.uuid : "";
+        const username = typeof payload.username === "string" ? payload.username.slice(0, 16) : "";
+        if (!/^[0-9a-fA-F-]{36}$/.test(uuid) || !/^[A-Za-z0-9_]{3,16}$/.test(username)) return json({ error: "Invalid player identity" }, 400);
+        const base = payload.baseStats || {};
+        const number = key => Number.isFinite(Number(base[key])) && Number(base[key]) >= 0 ? Number(base[key]) : 0;
+        await env.DB.prepare("INSERT INTO players(uuid,username,first_join,last_seen,playtime_seconds,blocks_broken,blocks_placed,deaths,kills,updated_at) VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(uuid) DO UPDATE SET username=excluded.username,last_seen=excluded.last_seen,playtime_seconds=excluded.playtime_seconds,blocks_broken=excluded.blocks_broken,blocks_placed=excluded.blocks_placed,deaths=excluded.deaths,kills=excluded.kills,updated_at=CURRENT_TIMESTAMP")
+          .bind(uuid,username,typeof payload.firstJoin==="string"?payload.firstJoin:null,typeof payload.lastSeen==="string"?payload.lastSeen:null,
+            number("playtime_seconds"),number("blocks_broken"),number("blocks_placed"),number("deaths"),number("kills")).run();
+        const stats = payload.statistics && typeof payload.statistics === "object"
+          ? Object.entries(payload.statistics).filter(([statId,value]) => /^[a-z0-9_.:-]{1,100}$/i.test(statId) && Number.isFinite(Number(value)) && Number(value) >= 0)
+          : [];
+        const statements = stats.map(([statId,value]) => env.DB.prepare("INSERT INTO player_statistics(minecraft_uuid,stat_id,stat_value) VALUES(?,?,?) ON CONFLICT(minecraft_uuid,stat_id) DO UPDATE SET stat_value=excluded.stat_value,updated_at=CURRENT_TIMESTAMP").bind(uuid,statId,Number(value)));
+        for (let i = 0; i < statements.length; i += 100) await env.DB.batch(statements.slice(i, i + 100));
+        await env.DB.prepare("UPDATE stats_refresh_queue SET status='done', claimed_at=NULL WHERE uuid=?").bind(uuid).run();
+        return json({ ok: true, statsStored: stats.length });
+      }
+
       const statsMatch = path.match(/^\/v1\/players\/([0-9a-fA-F-]{36})\/statistics$/);
       if (request.method === "GET" && statsMatch) {
-        const result = await env.DB.prepare("SELECT stat_id, stat_value, updated_at FROM player_statistics WHERE minecraft_uuid = ? ORDER BY stat_id").bind(statsMatch[1]).all();
+        const uuid = statsMatch[1];
+        if (url.searchParams.get("refresh") === "1") {
+          const player = await env.DB.prepare("SELECT username FROM players WHERE uuid=?").bind(uuid).first();
+          if (player?.username) {
+            await env.DB.prepare("INSERT INTO stats_refresh_queue(uuid,username,status,requested_at) VALUES(?,?,'pending',CURRENT_TIMESTAMP) ON CONFLICT(uuid) DO UPDATE SET username=excluded.username,status='pending',requested_at=CURRENT_TIMESTAMP WHERE stats_refresh_queue.requested_at < datetime('now','-60 seconds')").bind(uuid,player.username).run();
+          }
+        }
+        const result = await env.DB.prepare("SELECT stat_id, stat_value, updated_at FROM player_statistics WHERE minecraft_uuid = ? ORDER BY stat_id").bind(uuid).all();
         return json({ statistics: result.results || [] });
       }
 
