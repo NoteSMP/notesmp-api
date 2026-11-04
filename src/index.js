@@ -185,7 +185,7 @@ export default {
         if (url.searchParams.get("refresh") === "1") {
           const player = await env.DB.prepare("SELECT username FROM players WHERE uuid=?").bind(uuid).first();
           if (player?.username) {
-            await env.DB.prepare("INSERT INTO stats_refresh_queue(uuid,username,status,requested_at) VALUES(?,?,'pending',CURRENT_TIMESTAMP) ON CONFLICT(uuid) DO UPDATE SET username=excluded.username,status='pending',requested_at=CURRENT_TIMESTAMP WHERE stats_refresh_queue.requested_at < datetime('now','-60 seconds') OR stats_refresh_queue.status='done'").bind(uuid,player.username).run();
+            await env.DB.prepare("INSERT INTO stats_refresh_queue(uuid,username,status,requested_at) VALUES(?,?,'pending',CURRENT_TIMESTAMP) ON CONFLICT(uuid) DO UPDATE SET username=excluded.username,status='pending',requested_at=CURRENT_TIMESTAMP WHERE stats_refresh_queue.requested_at < datetime('now','-60 seconds')").bind(uuid,player.username).run();
           }
         }
         const result = await env.DB.prepare("SELECT stat_id, stat_value, updated_at FROM player_statistics WHERE minecraft_uuid = ? ORDER BY stat_id").bind(uuid).all();
