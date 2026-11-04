@@ -170,11 +170,17 @@ export default {
         await env.DB.prepare("INSERT INTO players(uuid,username,first_join,last_seen,playtime_seconds,blocks_broken,blocks_placed,deaths,kills,updated_at) VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(uuid) DO UPDATE SET username=excluded.username,last_seen=excluded.last_seen,playtime_seconds=excluded.playtime_seconds,blocks_broken=excluded.blocks_broken,blocks_placed=excluded.blocks_placed,deaths=excluded.deaths,kills=excluded.kills,updated_at=CURRENT_TIMESTAMP")
           .bind(uuid,username,typeof payload.firstJoin==="string"?payload.firstJoin:null,typeof payload.lastSeen==="string"?payload.lastSeen:null,
             number("playtime_seconds"),number("blocks_broken"),number("blocks_placed"),number("deaths"),number("kills")).run();
+        const allowedStats = new Set(["time_played","mob_kills","player_kills","deaths","time_since_last_death","damage_absorbed","damage_dealt","damage_resisted","damage_taken","jumps","sneak_time","distance_climbed","distance_crouched","distance_fallen","distance_flown","distance_sprinted","distance_swum","distance_walked","distance_walked_on_water","distance_walked_under_water","distance_by_boat","distance_by_elytra","distance_by_happy_ghast","distance_by_horse","distance_by_minecart","distance_by_nautilus","distance_by_pig","distance_by_strider","fish_caught","animals_bred","chests_opened","barrels_opened","shulker_boxes_opened","items_dropped","items_enchanted","talked_to_villagers","traded_with_villagers","time_since_last_rest","times_slept_in_a_bed"]);
         const stats = payload.statistics && typeof payload.statistics === "object"
-          ? Object.entries(payload.statistics).filter(([statId,value]) => /^[a-z0-9_.:-]{1,100}$/i.test(statId) && Number.isFinite(Number(value)) && Number(value) >= 0)
+          ? Object.entries(payload.statistics).filter(([statId,value]) => allowedStats.has(statId) && Number.isFinite(Number(value)) && Number(value) >= 0)
           : [];
+        // Purge legacy/unrequested entries so the API cache also follows the strict allowlist.
+        await env.DB.prepare("DELETE FROM player_statistics WHERE minecraft_uuid=?").bind(uuid).run();
         const statements = stats.map(([statId,value]) => env.DB.prepare("INSERT INTO player_statistics(minecraft_uuid,stat_id,stat_value) VALUES(?,?,?) ON CONFLICT(minecraft_uuid,stat_id) DO UPDATE SET stat_value=excluded.stat_value,updated_at=CURRENT_TIMESTAMP").bind(uuid,statId,Number(value)));
         for (let i = 0; i < statements.length; i += 100) await env.DB.batch(statements.slice(i, i + 100));
+        const mobBreakdown = payload.statistics?.mob_kill_breakdown && typeof payload.statistics.mob_kill_breakdown === "object" ? payload.statistics.mob_kill_breakdown : {};
+        const mobStatements = Object.entries(mobBreakdown).filter(([id,value]) => /^[a-z0-9_]+$/i.test(id) && Number.isFinite(Number(value)) && Number(value) >= 0).map(([id,value]) => env.DB.prepare("INSERT INTO player_statistics(minecraft_uuid,stat_id,stat_value) VALUES(?,?,?) ON CONFLICT(minecraft_uuid,stat_id) DO UPDATE SET stat_value=excluded.stat_value,updated_at=CURRENT_TIMESTAMP").bind(uuid,"mob_kill:"+id,Number(value)));
+        for (let i = 0; i < mobStatements.length; i += 100) await env.DB.batch(mobStatements.slice(i, i + 100));
         await env.DB.prepare("UPDATE stats_refresh_queue SET status='done', claimed_at=NULL WHERE uuid=?").bind(uuid).run();
         return json({ ok: true, statsStored: stats.length });
       }
