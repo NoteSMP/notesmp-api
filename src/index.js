@@ -151,19 +151,46 @@ export default {
             source: "live-ping"
           });
         } catch (error) {
-          console.warn("Live Minecraft status check failed; returning OFFLINE instead of stale state:", error);
-          return json({
-            online: false,
-            playersOnline: 0,
-            maxPlayers: 0,
-            motd: "",
-            version: null,
-            onlinePlayers: [],
-            updatedAt: new Date().toISOString(),
-            source: "ping-failed",
-            unavailable: true
-          });
+          console.warn("Primary Minecraft status lookup failed; trying mcstatus.io:", error);
+          try {
+            const fallback = await fetch("https://api.mcstatus.io/v2/status/java/notesmp.de?query=false&timeout=6", {
+              headers: { Accept: "application/json", "User-Agent": "NoteSMP-Website/1.0 (https://www.notesmp.de)" },
+              signal: AbortSignal.timeout(8000)
+            });
+            if (!fallback.ok) throw new Error("mcstatus.io returned HTTP " + fallback.status);
+            const status = await fallback.json();
+            if (typeof status.online !== "boolean") throw new Error("mcstatus.io returned an invalid response");
+            const rawMotd = status.motd?.raw || status.motd?.clean || "";
+            const motd = Array.isArray(rawMotd) ? rawMotd.join("\n") : rawMotd;
+            const players = Array.isArray(status.players?.sample)
+              ? status.players.sample.map(p => ({ name: p.name_clean || p.name_raw || p.name, uuid: p.uuid })).filter(p => p.name).slice(0, 200)
+              : [];
+            return json({
+              online: status.online,
+              playersOnline: status.online ? Number(status.players?.online || 0) : 0,
+              maxPlayers: Number(status.players?.max || 0),
+              motd,
+              version: status.version?.name_clean || status.version?.name_raw || null,
+              onlinePlayers: status.online ? players : [],
+              updatedAt: new Date().toISOString(),
+              source: "mcstatus.io"
+            });
+          } catch (fallbackError) {
+            console.warn("Both Minecraft status providers failed:", fallbackError);
+            return json({
+              online: false,
+              playersOnline: 0,
+              maxPlayers: 0,
+              motd: "",
+              version: null,
+              onlinePlayers: [],
+              updatedAt: new Date().toISOString(),
+              source: "ping-failed",
+              unavailable: true
+            });
+          }
         }
+      }
       }
 
       if (request.method === "GET" && path === "/v1/players") {
