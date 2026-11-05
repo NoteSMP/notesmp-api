@@ -219,7 +219,7 @@ export default {
 
       const advancementsMatch = path.match(/^\/v1\/players\/([0-9a-fA-F-]{36})\/advancements$/);
       if (request.method === "GET" && advancementsMatch) {
-        const result = await env.DB.prepare("SELECT advancement_id, advancement_title, earned_at FROM player_advancements WHERE minecraft_uuid = ? ORDER BY earned_at DESC, advancement_id").bind(advancementsMatch[1]).all();
+        const result = await env.DB.prepare("SELECT advancement_id, advancement_title, icon_name, earned_at FROM player_advancements WHERE minecraft_uuid = ? ORDER BY earned_at DESC, advancement_id").bind(advancementsMatch[1]).all();
         return json({ advancements: result.results || [] });
       }
 
@@ -295,19 +295,20 @@ export default {
           .map(item => ({
             id: item.advancementId,
             title: typeof item.title === "string" ? item.title.slice(0, 180) : item.advancementId,
+            icon: typeof item.icon === "string" ? item.icon.slice(0, 120) : null,
             earnedAt: typeof item.earnedAt === "string" ? item.earnedAt : new Date().toISOString()
           }));
-        const existingResult = await env.DB.prepare("SELECT advancement_id, advancement_title, earned_at FROM player_advancements WHERE minecraft_uuid=?").bind(uuid).all();
+        const existingResult = await env.DB.prepare("SELECT advancement_id, advancement_title, icon_name, earned_at FROM player_advancements WHERE minecraft_uuid=?").bind(uuid).all();
         const existing = new Map((existingResult.results || []).map(row => [row.advancement_id, row]));
         const incoming = new Map(normalized.map(item => [item.id, item]));
         const changed = normalized.filter(item => {
           const old = existing.get(item.id);
-          return !old || old.advancement_title !== item.title || old.earned_at !== item.earnedAt;
+          return !old || old.advancement_title !== item.title || old.icon_name !== item.icon || old.earned_at !== item.earnedAt;
         });
         const removed = [...existing.keys()].filter(id => !incoming.has(id));
         const statements = changed.map(item =>
-          env.DB.prepare("INSERT INTO player_advancements (minecraft_uuid, advancement_id, advancement_title, earned_at) VALUES (?, ?, ?, ?) ON CONFLICT(minecraft_uuid, advancement_id) DO UPDATE SET advancement_title=excluded.advancement_title, earned_at=excluded.earned_at")
-            .bind(uuid, item.id, item.title, item.earnedAt));
+          env.DB.prepare("INSERT INTO player_advancements (minecraft_uuid, advancement_id, advancement_title, icon_name, earned_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(minecraft_uuid, advancement_id) DO UPDATE SET advancement_title=excluded.advancement_title, icon_name=excluded.icon_name, earned_at=excluded.earned_at")
+            .bind(uuid, item.id, item.title, item.icon, item.earnedAt));
         if (removed.length) {
           const placeholders = removed.map(() => "?").join(",");
           statements.push(env.DB.prepare("DELETE FROM player_advancements WHERE minecraft_uuid=? AND advancement_id IN (" + placeholders + ")").bind(uuid, ...removed));
@@ -323,10 +324,11 @@ export default {
         const username = typeof body.username === "string" ? body.username.slice(0, 16) : "";
         const advancementId = typeof body.advancementId === "string" ? body.advancementId.slice(0, 180) : "";
         const title = typeof body.title === "string" ? body.title.slice(0, 180) : advancementId;
+        const icon = typeof body.icon === "string" ? body.icon.slice(0, 120) : null;
         const earnedAt = typeof body.earnedAt === "string" ? body.earnedAt : new Date().toISOString();
         if (!/^[0-9a-fA-F-]{36}$/.test(uuid) || !username || !advancementId) return json({ error: "Invalid advancement payload" }, 400);
         await env.DB.prepare("INSERT INTO players (uuid, username, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(uuid) DO UPDATE SET username=excluded.username, updated_at=CURRENT_TIMESTAMP").bind(uuid, username).run();
-        await env.DB.prepare("INSERT INTO player_advancements (minecraft_uuid, advancement_id, advancement_title, earned_at) VALUES (?, ?, ?, ?) ON CONFLICT(minecraft_uuid, advancement_id) DO UPDATE SET advancement_title=excluded.advancement_title, earned_at=excluded.earned_at").bind(uuid, advancementId, title, earnedAt).run();
+        await env.DB.prepare("INSERT INTO player_advancements (minecraft_uuid, advancement_id, advancement_title, icon_name, earned_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(minecraft_uuid, advancement_id) DO UPDATE SET advancement_title=excluded.advancement_title, icon_name=excluded.icon_name, earned_at=excluded.earned_at").bind(uuid, advancementId, title, icon, earnedAt).run();
         return json({ ok: true });
       }
 
@@ -425,7 +427,7 @@ export class LiveProfileChannel {
       const result = {
         uuid: pending.uuid, username: pending.username,
         statistics: Array.isArray(body.statistics) ? body.statistics : [],
-        advancements: Array.isArray(body.advancements) ? body.advancements : [],
+        advancements: Array.isArray(body.advancements) ? body.advancements.map(item => ({ ...item, advancement_id: item.advancement_id || item.advancementId, advancement_title: item.advancement_title || item.title, icon_name: item.icon_name || item.icon || null, earned_at: item.earned_at || item.earnedAt })) : [],
         baseStats: body.baseStats && typeof body.baseStats === "object" ? body.baseStats : {},
         firstJoin: typeof body.firstJoin === "string" ? body.firstJoin : null,
         lastSeen: typeof body.lastSeen === "string" ? body.lastSeen : null,
