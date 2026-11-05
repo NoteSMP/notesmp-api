@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS player_advancements (
   minecraft_uuid TEXT NOT NULL,
   advancement_id TEXT NOT NULL,
   advancement_title TEXT NOT NULL DEFAULT '',
+  icon_name TEXT,
   earned_at TEXT NOT NULL,
   PRIMARY KEY (minecraft_uuid, advancement_id)
 );
