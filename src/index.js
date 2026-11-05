@@ -123,6 +123,20 @@ export default {
           if (!ping.ok) throw new Error("Status provider returned HTTP " + ping.status);
           const status = await ping.json();
           if (typeof status.online !== "boolean") throw new Error("Status provider returned an invalid response");
+          if (status.online && !status.motd?.raw && !status.motd?.clean) {
+            try {
+              const motdResponse = await fetch("https://api.mcstatus.io/v2/status/java/notesmp.de?query=false&timeout=6", {
+                headers: { Accept: "application/json", "User-Agent": "NoteSMP-Website/1.0 (https://www.notesmp.de)" },
+                signal: AbortSignal.timeout(8000)
+              });
+              if (motdResponse.ok) {
+                const alternate = await motdResponse.json();
+                if (alternate.online && alternate.motd) status.motd = alternate.motd;
+              }
+            } catch (error) {
+              console.warn("Secondary Minecraft MOTD lookup failed:", error);
+            }
+          }
           const players = Array.isArray(status.players?.list)
             ? status.players.list.map(p => typeof p === "string" ? { name: p } : p).slice(0, 200)
             : [];
