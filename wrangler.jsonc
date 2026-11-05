@@ -9,5 +9,21 @@
       "database_name": "notesmp-data",
       "database_id": "2fa4bdb1-faf0-432b-8b42-5f02c2cfdea3"
     }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "LIVE_PROFILES",
+        "class_name": "LiveProfileChannel"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1-live-profile-channel",
+      "new_sqlite_classes": [
+        "LiveProfileChannel"
+      ]
+    }
   ]
 }
