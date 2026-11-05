@@ -191,6 +191,13 @@ export default {
         return new Response(response.body, { status: response.status, headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-store" } });
       }
 
+      if (request.method === "GET" && path === "/v1/server/plugin-state") {
+        if (!env.LIVE_PROFILES) return json({ pluginAvailable: false, refreshAt: 0 });
+        const channel = env.LIVE_PROFILES.get(env.LIVE_PROFILES.idFromName("notesmp-live-profiles"));
+        const response = await channel.fetch("https://live-profile/status");
+        return new Response(response.body, { status: response.status, headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-store" } });
+      }
+
       if (request.method === "POST" && path === "/v1/minecraft/status-refresh") {
         if (!requireServerKey(request, env)) return unauthorized();
         if (env.LIVE_PROFILES) {
@@ -391,11 +398,17 @@ export class LiveProfileChannel {
       await this.state.storage.delete("pending:" + requestId);
       return json({ error: "Plugin did not respond in time", unavailable: true }, 504);
     }
+    if (request.method === "GET" && url.pathname === "/status") {
+      const lastPoll = Number(await this.state.storage.get("last-plugin-poll") || 0);
+      const refreshAt = Number(await this.state.storage.get("last-status-refresh") || 0);
+      return json({ pluginAvailable: Date.now() - lastPoll < 15000, refreshAt });
+    }
     if (request.method === "POST" && url.pathname === "/status-refresh") {
       await this.state.storage.put("last-status-refresh", Date.now());
       return json({ ok: true });
     }
     if (request.method === "GET" && url.pathname === "/poll") {
+      await this.state.storage.put("last-plugin-poll", Date.now());
       const listed = await this.state.storage.list({ prefix: "pending:", limit: 50 });
       const requests = [...listed.values()].sort((a, b) => a.createdAt - b.createdAt);
       const next = requests.find(item => Date.now() - item.createdAt < 20000 && (!item.claimedAt || Date.now() - item.claimedAt > 8000));
