@@ -191,7 +191,6 @@ export default {
           }
         }
       }
-      }
 
       if (request.method === "GET" && path === "/v1/players") {
         const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 100);
