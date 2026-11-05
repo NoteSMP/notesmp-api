@@ -115,9 +115,9 @@ export default {
         // A failed or timed-out live ping must fail closed, otherwise stale ONLINE
         // state can survive a server shutdown indefinitely.
         try {
-          const ping = await fetch("https://api.mcsrvstat.us/2/notesmp.de", {
-            headers: { Accept: "application/json" },
-            signal: AbortSignal.timeout(5000),
+          const ping = await fetch("https://api.mcsrvstat.us/3/notesmp.de", {
+            headers: { Accept: "application/json", "User-Agent": "NoteSMP-Website/1.0 (https://www.notesmp.de)" },
+            signal: AbortSignal.timeout(10000),
             cf: { cacheTtl: 0, cacheEverything: false }
           });
           if (!ping.ok) throw new Error("Status provider returned HTTP " + ping.status);
