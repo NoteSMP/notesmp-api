@@ -384,7 +384,6 @@ export class LiveProfileChannel {
       const requestId = crypto.randomUUID();
       const item = { requestId, uuid: body.uuid.toLowerCase(), username: body.username, createdAt: Date.now() };
       await this.state.storage.put("pending:" + requestId, item);
-      await this.state.storage.put("latest:" + item.uuid, requestId);
       const deadline = Date.now() + 18000;
       while (Date.now() < deadline) {
         const result = await this.state.storage.get("response:" + requestId);
