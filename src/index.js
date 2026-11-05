@@ -111,21 +111,45 @@ export default {
       }
 
       if (request.method === "GET" && path === "/v1/server") {
-        // Public Minecraft status is primary so the website still works without the plugin.
-        // The database heartbeat remains a resilient fallback if the public status provider fails.
+        // Never use a stored heartbeat as proof that the server is online.
+        // A failed or timed-out live ping must fail closed, otherwise stale ONLINE
+        // state can survive a server shutdown indefinitely.
         try {
-          const ping = await fetch("https://api.mcsrvstat.us/2/notesmp.de", { headers: { Accept: "application/json" } });
-          if (ping.ok) {
-            const status = await ping.json();
-            const players = Array.isArray(status.players?.list) ? status.players.list.map(p => typeof p === "string" ? { name: p } : p).slice(0, 200) : [];
-            return json({ online: Boolean(status.online), playersOnline: Number(status.players?.online || 0), maxPlayers: Number(status.players?.max || 0), motd: status.motd?.raw || status.motd?.clean || "", version: status.version || null, onlinePlayers: players, updatedAt: new Date().toISOString(), source: "public-ping" });
-          }
-        } catch {}
-        const row = await env.DB.prepare("SELECT online, players_online, max_players, motd, version, online_players_json, updated_at FROM server_state WHERE id = 1").first();
-        if (!row) return json({ online: false, playersOnline: 0, maxPlayers: 0, motd: "", version: null, onlinePlayers: [], updatedAt: null });
-        let onlinePlayers = [];
-        try { onlinePlayers = JSON.parse(row.online_players_json || "[]"); } catch {}
-        return json({ online: Boolean(row.online), playersOnline: row.players_online, maxPlayers: row.max_players, motd: row.motd || "", version: row.version, onlinePlayers, updatedAt: row.updated_at, source: "plugin-heartbeat" });
+          const ping = await fetch("https://api.mcsrvstat.us/2/notesmp.de", {
+            headers: { Accept: "application/json" },
+            signal: AbortSignal.timeout(5000),
+            cf: { cacheTtl: 0, cacheEverything: false }
+          });
+          if (!ping.ok) throw new Error("Status provider returned HTTP " + ping.status);
+          const status = await ping.json();
+          if (typeof status.online !== "boolean") throw new Error("Status provider returned an invalid response");
+          const players = Array.isArray(status.players?.list)
+            ? status.players.list.map(p => typeof p === "string" ? { name: p } : p).slice(0, 200)
+            : [];
+          return json({
+            online: status.online,
+            playersOnline: status.online ? Number(status.players?.online || 0) : 0,
+            maxPlayers: Number(status.players?.max || 0),
+            motd: status.motd?.raw || status.motd?.clean || "",
+            version: status.version || null,
+            onlinePlayers: status.online ? players : [],
+            updatedAt: new Date().toISOString(),
+            source: "live-ping"
+          });
+        } catch (error) {
+          console.warn("Live Minecraft status check failed; returning OFFLINE instead of stale state:", error);
+          return json({
+            online: false,
+            playersOnline: 0,
+            maxPlayers: 0,
+            motd: "",
+            version: null,
+            onlinePlayers: [],
+            updatedAt: new Date().toISOString(),
+            source: "ping-failed",
+            unavailable: true
+          });
+        }
       }
 
       if (request.method === "GET" && path === "/v1/players") {
