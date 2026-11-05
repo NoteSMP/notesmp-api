@@ -144,7 +144,7 @@ export default {
             online: status.online,
             playersOnline: status.online ? Number(status.players?.online || 0) : 0,
             maxPlayers: Number(status.players?.max || 0),
-            motd: status.motd?.raw || status.motd?.clean || "",
+            motd: Array.isArray(status.motd?.raw) ? status.motd.raw.join("\n") : Array.isArray(status.motd?.clean) ? status.motd.clean.join("\n") : status.motd?.raw || status.motd?.clean || "",
             version: status.version || null,
             onlinePlayers: status.online ? players : [],
             updatedAt: new Date().toISOString(),
