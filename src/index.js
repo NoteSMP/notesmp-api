@@ -254,7 +254,6 @@ export default {
           statements.push(env.DB.prepare("DELETE FROM player_statistics WHERE minecraft_uuid=? AND stat_id IN (" + placeholders + ")").bind(uuid, ...removed));
         }
         for (let i = 0; i < statements.length; i += 100) await env.DB.batch(statements.slice(i, i + 100));
-        await env.DB.prepare("UPDATE stats_refresh_queue SET status='done', claimed_at=NULL WHERE uuid=?").bind(uuid).run();
         return json({ ok: true, statsReceived: stats.length, statsChanged: changed.length, statsRemoved: removed.length });
       }
 
@@ -284,7 +283,6 @@ export default {
         const username = typeof body.username === "string" ? body.username.slice(0, 16) : "";
         const advancements = Array.isArray(body.advancements) ? body.advancements.slice(0, 5000) : [];
         if (!/^[0-9a-fA-F-]{36}$/.test(uuid) || !username) return json({ error: "Invalid advancement payload" }, 400);
-        await env.DB.prepare("INSERT INTO players (uuid, username, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(uuid) DO UPDATE SET username=excluded.username, updated_at=CURRENT_TIMESTAMP").bind(uuid, username).run();
         // Treat the payload as a complete snapshot, but only mutate D1 rows that differ.
         const normalized = advancements.filter(item => item && typeof item.advancementId === "string" && item.advancementId.length <= 180)
           .map(item => ({
