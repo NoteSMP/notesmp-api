@@ -168,6 +168,39 @@ export default {
         return player ? json({ player }) : json({ error: "Player not found" }, 404);
       }
 
+      const liveProfileMatch = path.match(/^\/v1\/players\/([0-9a-fA-F-]{36})\/live$/);
+      if (request.method === "GET" && liveProfileMatch) {
+        const uuid = liveProfileMatch[1].toLowerCase();
+        const player = await env.DB.prepare("SELECT username FROM players WHERE uuid=?").bind(uuid).first();
+        if (!player?.username) return json({ error: "Player not found" }, 404);
+        if (!env.LIVE_PROFILES) return json({ error: "Live profile channel is not configured" }, 503);
+        const id = env.LIVE_PROFILES.idFromName("notesmp-live-profiles");
+        const channel = env.LIVE_PROFILES.get(id);
+        const response = await channel.fetch("https://live-profile/request", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ uuid, username: player.username })
+        });
+        return new Response(response.body, { status: response.status, headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-store" } });
+      }
+
+      if (request.method === "GET" && path === "/v1/minecraft/live/poll") {
+        if (!requireServerKey(request, env)) return unauthorized();
+        if (!env.LIVE_PROFILES) return json({ request: null });
+        const channel = env.LIVE_PROFILES.get(env.LIVE_PROFILES.idFromName("notesmp-live-profiles"));
+        const response = await channel.fetch("https://live-profile/poll");
+        return new Response(response.body, { status: response.status, headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-store" } });
+      }
+
+      if (request.method === "POST" && path === "/v1/minecraft/live/response") {
+        if (!requireServerKey(request, env)) return unauthorized();
+        if (!env.LIVE_PROFILES) return json({ error: "Live profile channel is not configured" }, 503);
+        const channel = env.LIVE_PROFILES.get(env.LIVE_PROFILES.idFromName("notesmp-live-profiles"));
+        const response = await channel.fetch("https://live-profile/respond", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: await request.text()
+        });
+        return new Response(response.body, { status: response.status, headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-store" } });
+      }
+
       const advancementsMatch = path.match(/^\/v1\/players\/([0-9a-fA-F-]{36})\/advancements$/);
       if (request.method === "GET" && advancementsMatch) {
         const result = await env.DB.prepare("SELECT advancement_id, advancement_title, earned_at FROM player_advancements WHERE minecraft_uuid = ? ORDER BY earned_at DESC, advancement_id").bind(advancementsMatch[1]).all();
@@ -324,3 +357,53 @@ export default {
     }
   }
 };
+
+
+export class LiveProfileChannel {
+  constructor(state) { this.state = state; }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname === "/request") {
+      const body = await request.json();
+      if (!/^[0-9a-f-]{36}$/i.test(body.uuid || "") || typeof body.username !== "string") return json({ error: "Invalid player" }, 400);
+      const requestId = crypto.randomUUID();
+      const item = { requestId, uuid: body.uuid.toLowerCase(), username: body.username, createdAt: Date.now() };
+      await this.state.storage.put("pending:" + requestId, item);
+      await this.state.storage.put("latest:" + item.uuid, requestId);
+      const deadline = Date.now() + 18000;
+      while (Date.now() < deadline) {
+        const result = await this.state.storage.get("response:" + requestId);
+        if (result) {
+          await this.state.storage.delete("response:" + requestId);
+          await this.state.storage.delete("pending:" + requestId);
+          return json({ ok: true, source: "plugin-live", ...result });
+        }
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      await this.state.storage.delete("pending:" + requestId);
+      return json({ error: "Plugin did not respond in time", unavailable: true }, 504);
+    }
+    if (request.method === "GET" && url.pathname === "/poll") {
+      const listed = await this.state.storage.list({ prefix: "pending:", limit: 50 });
+      const requests = [...listed.values()].sort((a, b) => a.createdAt - b.createdAt);
+      const next = requests.find(item => Date.now() - item.createdAt < 20000);
+      return json({ request: next || null });
+    }
+    if (request.method === "POST" && url.pathname === "/respond") {
+      const body = await request.json();
+      if (typeof body.requestId !== "string") return json({ error: "Missing requestId" }, 400);
+      const pending = await this.state.storage.get("pending:" + body.requestId);
+      if (!pending || Date.now() - pending.createdAt > 20000) return json({ error: "Request expired" }, 404);
+      const result = {
+        uuid: pending.uuid, username: pending.username,
+        statistics: Array.isArray(body.statistics) ? body.statistics : [],
+        advancements: Array.isArray(body.advancements) ? body.advancements : [],
+        receivedAt: new Date().toISOString()
+      };
+      await this.state.storage.put("response:" + body.requestId, result, { expirationTtl: 25 });
+      return json({ ok: true });
+    }
+    return json({ error: "Not found" }, 404);
+  }
+}
