@@ -198,12 +198,22 @@ export default {
         const stats = payload.statistics && typeof payload.statistics === "object"
           ? Object.entries(payload.statistics).filter(([statId,value]) => allowedStats.has(statId) && Number.isFinite(Number(value)) && Number(value) >= 0)
           : [];
-        // Purge legacy/unrequested entries so the API cache also follows the strict allowlist.
-        await env.DB.prepare("DELETE FROM player_statistics WHERE minecraft_uuid=?").bind(uuid).run();
-        const statements = stats.map(([statId,value]) => env.DB.prepare("INSERT INTO player_statistics(minecraft_uuid,stat_id,stat_value) VALUES(?,?,?) ON CONFLICT(minecraft_uuid,stat_id) DO UPDATE SET stat_value=excluded.stat_value,updated_at=CURRENT_TIMESTAMP").bind(uuid,statId,Number(value)));
+        // Compare the incoming complete snapshot with D1 and write only actual differences.
+        const existingResult = await env.DB.prepare("SELECT stat_id, stat_value FROM player_statistics WHERE minecraft_uuid=?").bind(uuid).all();
+        const existing = new Map((existingResult.results || []).map(row => [row.stat_id, Number(row.stat_value)]));
+        const incoming = new Map(stats.map(([statId, value]) => [statId, Number(value)]));
+        const changed = stats.filter(([statId, value]) => !existing.has(statId) || existing.get(statId) !== Number(value));
+        const removed = [...existing.keys()].filter(statId => !incoming.has(statId));
+        const statements = changed.map(([statId,value]) =>
+          env.DB.prepare("INSERT INTO player_statistics(minecraft_uuid,stat_id,stat_value) VALUES(?,?,?) ON CONFLICT(minecraft_uuid,stat_id) DO UPDATE SET stat_value=excluded.stat_value,updated_at=CURRENT_TIMESTAMP")
+            .bind(uuid,statId,Number(value)));
+        if (removed.length) {
+          const placeholders = removed.map(() => "?").join(",");
+          statements.push(env.DB.prepare("DELETE FROM player_statistics WHERE minecraft_uuid=? AND stat_id IN (" + placeholders + ")").bind(uuid, ...removed));
+        }
         for (let i = 0; i < statements.length; i += 100) await env.DB.batch(statements.slice(i, i + 100));
         await env.DB.prepare("UPDATE stats_refresh_queue SET status='done', claimed_at=NULL WHERE uuid=?").bind(uuid).run();
-        return json({ ok: true, statsStored: stats.length });
+        return json({ ok: true, statsReceived: stats.length, statsChanged: changed.length, statsRemoved: removed.length });
       }
 
       const statsMatch = path.match(/^\/v1\/players\/([0-9a-fA-F-]{36})\/statistics$/);
@@ -233,13 +243,30 @@ export default {
         const advancements = Array.isArray(body.advancements) ? body.advancements.slice(0, 5000) : [];
         if (!/^[0-9a-fA-F-]{36}$/.test(uuid) || !username) return json({ error: "Invalid advancement payload" }, 400);
         await env.DB.prepare("INSERT INTO players (uuid, username, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(uuid) DO UPDATE SET username=excluded.username, updated_at=CURRENT_TIMESTAMP").bind(uuid, username).run();
-        // The plugin sends the complete earned set during reconciliation; remove stale DB entries first.
-        await env.DB.prepare("DELETE FROM player_advancements WHERE minecraft_uuid=?").bind(uuid).run();
-        const statements = advancements.filter(item => item && typeof item.advancementId === "string" && item.advancementId.length <= 180)
-          .map(item => env.DB.prepare("INSERT INTO player_advancements (minecraft_uuid, advancement_id, advancement_title, earned_at) VALUES (?, ?, ?, ?) ON CONFLICT(minecraft_uuid, advancement_id) DO UPDATE SET advancement_title=excluded.advancement_title, earned_at=excluded.earned_at")
-            .bind(uuid, item.advancementId, typeof item.title === "string" ? item.title.slice(0, 180) : item.advancementId, typeof item.earnedAt === "string" ? item.earnedAt : new Date().toISOString()));
+        // Treat the payload as a complete snapshot, but only mutate D1 rows that differ.
+        const normalized = advancements.filter(item => item && typeof item.advancementId === "string" && item.advancementId.length <= 180)
+          .map(item => ({
+            id: item.advancementId,
+            title: typeof item.title === "string" ? item.title.slice(0, 180) : item.advancementId,
+            earnedAt: typeof item.earnedAt === "string" ? item.earnedAt : new Date().toISOString()
+          }));
+        const existingResult = await env.DB.prepare("SELECT advancement_id, advancement_title, earned_at FROM player_advancements WHERE minecraft_uuid=?").bind(uuid).all();
+        const existing = new Map((existingResult.results || []).map(row => [row.advancement_id, row]));
+        const incoming = new Map(normalized.map(item => [item.id, item]));
+        const changed = normalized.filter(item => {
+          const old = existing.get(item.id);
+          return !old || old.advancement_title !== item.title || old.earned_at !== item.earnedAt;
+        });
+        const removed = [...existing.keys()].filter(id => !incoming.has(id));
+        const statements = changed.map(item =>
+          env.DB.prepare("INSERT INTO player_advancements (minecraft_uuid, advancement_id, advancement_title, earned_at) VALUES (?, ?, ?, ?) ON CONFLICT(minecraft_uuid, advancement_id) DO UPDATE SET advancement_title=excluded.advancement_title, earned_at=excluded.earned_at")
+            .bind(uuid, item.id, item.title, item.earnedAt));
+        if (removed.length) {
+          const placeholders = removed.map(() => "?").join(",");
+          statements.push(env.DB.prepare("DELETE FROM player_advancements WHERE minecraft_uuid=? AND advancement_id IN (" + placeholders + ")").bind(uuid, ...removed));
+        }
         for (let i = 0; i < statements.length; i += 100) await env.DB.batch(statements.slice(i, i + 100));
-        return json({ ok: true, advancementsStored: statements.length });
+        return json({ ok: true, advancementsReceived: normalized.length, advancementsChanged: changed.length, advancementsRemoved: removed.length });
       }
 
       if (request.method === "POST" && path === "/v1/minecraft/advancement") {
