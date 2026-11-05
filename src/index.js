@@ -414,6 +414,9 @@ export class LiveProfileChannel {
         uuid: pending.uuid, username: pending.username,
         statistics: Array.isArray(body.statistics) ? body.statistics : [],
         advancements: Array.isArray(body.advancements) ? body.advancements : [],
+        baseStats: body.baseStats && typeof body.baseStats === "object" ? body.baseStats : {},
+        firstJoin: typeof body.firstJoin === "string" ? body.firstJoin : null,
+        lastSeen: typeof body.lastSeen === "string" ? body.lastSeen : null,
         receivedAt: new Date().toISOString()
       };
       await this.state.storage.put("response:" + body.requestId, result, { expirationTtl: 25 });
