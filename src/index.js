@@ -361,8 +361,19 @@ export default {
       if (request.method === "GET" && path === "/v1/server") {
         // Ping the actual Minecraft TCP endpoint directly. Third-party status APIs
         // cache responses for 1–5 minutes, so they cannot satisfy an explicit refresh.
+        let target;
         try {
-          const target = await resolveMinecraftTarget();
+          target = await resolveMinecraftTarget();
+        } catch (resolveError) {
+          console.warn("Could not resolve the Minecraft server target:", resolveError);
+          return json({
+            online: false, playersOnline: 0, maxPlayers: 0, motd: "", version: null,
+            onlinePlayers: [], updatedAt: new Date().toISOString(),
+            source: "target-resolution-failed", unavailable: true,
+            error: "The Minecraft server address could not be resolved."
+          });
+        }
+        try {
           return json(await readMinecraftStatus(target));
         } catch (directError) {
           console.warn("Direct Minecraft status ping failed; trying live status providers:", directError);
