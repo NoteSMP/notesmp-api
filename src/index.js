@@ -247,12 +247,28 @@ export default {
         return json({ ok: true, signal: "status-refresh" });
       }
 
+      if (request.method === "GET" && path === "/v1/server/advancement-count") {
+        const row = await env.DB.prepare("SELECT meta_value, updated_at FROM server_metadata WHERE meta_key='total_advancements'").first();
+        return json({ totalAdvancements: row ? Number(row.meta_value) || 0 : null, updatedAt: row?.updated_at || null });
+      }
+
       if (request.method === "POST" && path === "/v1/minecraft/live/response") {
         if (!requireServerKey(request, env)) return unauthorized();
         if (!env.LIVE_PROFILES) return json({ error: "Live profile channel is not configured" }, 503);
         const channel = env.LIVE_PROFILES.get(env.LIVE_PROFILES.idFromName("notesmp-live-profiles"));
+        const responseBody = await request.text();
+        try {
+          const livePayload = JSON.parse(responseBody);
+          const totalAdvancements = Number(livePayload.totalAdvancements);
+          if (Number.isInteger(totalAdvancements) && totalAdvancements >= 0) {
+            await env.DB.prepare("INSERT INTO server_metadata(meta_key,meta_value,updated_at) VALUES('total_advancements',?,CURRENT_TIMESTAMP) ON CONFLICT(meta_key) DO UPDATE SET meta_value=excluded.meta_value,updated_at=CURRENT_TIMESTAMP")
+              .bind(String(totalAdvancements)).run();
+          }
+        } catch (error) {
+          // Keep the live channel resilient; malformed optional metadata must not block profile delivery.
+        }
         const response = await channel.fetch("https://live-profile/respond", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: await request.text()
+          method: "POST", headers: { "Content-Type": "application/json" }, body: responseBody
         });
         return new Response(response.body, { status: response.status, headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-store" } });
       }
