@@ -275,7 +275,7 @@ export default {
 
       const advancementsMatch = path.match(/^\/v1\/players\/([0-9a-fA-F-]{36})\/advancements$/);
       if (request.method === "GET" && advancementsMatch) {
-        const result = await env.DB.prepare("SELECT advancement_id, advancement_title, icon_name, earned_at FROM player_advancements WHERE minecraft_uuid = ? AND advancement_id NOT LIKE 'minecraft:recipes/%' AND advancement_id NOT LIKE '%/root' ORDER BY earned_at DESC, advancement_id").bind(advancementsMatch[1].toLowerCase()).all();
+        const result = await env.DB.prepare("SELECT advancement_id, earned_at FROM player_advancements WHERE minecraft_uuid = ? AND advancement_id NOT LIKE 'minecraft:recipes/%' AND advancement_id NOT LIKE '%/root' ORDER BY earned_at DESC, advancement_id").bind(advancementsMatch[1].toLowerCase()).all();
         return json({ advancements: result.results || [] });
       }
 
@@ -488,7 +488,10 @@ export class LiveProfileChannel {
       const result = {
         uuid: pending.uuid, username: pending.username,
         statistics: Array.isArray(body.statistics) ? body.statistics : [],
-        advancements: Array.isArray(body.advancements) ? body.advancements.map(item => ({ ...item, advancement_id: item.advancement_id || item.advancementId, advancement_title: item.advancement_title || item.title, icon_name: item.icon_name || item.icon || null, earned_at: item.earned_at || item.earnedAt })) : [],
+        advancements: Array.isArray(body.advancements) ? body.advancements.map(item => ({
+          advancement_id: item.advancement_id || item.advancementId,
+          earned_at: item.earned_at || item.earnedAt || null
+        })) : [],
         baseStats: body.baseStats && typeof body.baseStats === "object" ? body.baseStats : {},
         firstJoin: typeof body.firstJoin === "string" ? body.firstJoin : null,
         lastSeen: typeof body.lastSeen === "string" ? body.lastSeen : null,
