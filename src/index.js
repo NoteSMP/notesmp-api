@@ -1,3 +1,128 @@
+import { connect } from "cloudflare:sockets";
+
+function encodeVarInt(value) {
+  const bytes = [];
+  let n = value >>> 0;
+  do {
+    let byte = n & 0x7f;
+    n >>>= 7;
+    if (n !== 0) byte |= 0x80;
+    bytes.push(byte);
+  } while (n !== 0);
+  return Uint8Array.from(bytes);
+}
+
+function decodeVarInt(bytes, offset = 0) {
+  let value = 0, position = offset, byte;
+  do {
+    if (position >= bytes.length || position - offset >= 5) throw new Error("Invalid Minecraft VarInt");
+    byte = bytes[position++];
+    value |= (byte & 0x7f) << ((position - offset - 1) * 7);
+  } while (byte & 0x80);
+  return { value: value >>> 0, offset: position };
+}
+
+function joinBytes(...parts) {
+  const output = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+  let offset = 0;
+  for (const part of parts) { output.set(part, offset); offset += part.length; }
+  return output;
+}
+
+function minecraftString(value) {
+  const bytes = new TextEncoder().encode(value);
+  return joinBytes(encodeVarInt(bytes.length), bytes);
+}
+
+async function resolveMinecraftTarget() {
+  try {
+    const response = await fetch("https://cloudflare-dns.com/dns-query?name=_minecraft._tcp.notesmp.de&type=SRV", {
+      headers: { Accept: "application/dns-json" },
+      signal: AbortSignal.timeout(3000)
+    });
+    if (response.ok) {
+      const dns = await response.json();
+      const record = (dns.Answer || []).find(item => item.type === 33);
+      const match = String(record?.data || "").match(/^\d+\s+\d+\s+(\d+)\s+([a-z0-9.-]+)\.?$/i);
+      if (match) return { hostname: match[2].replace(/\.$/, ""), port: Number(match[1]) };
+    }
+  } catch (error) {
+    console.warn("Minecraft SRV lookup failed; using configured endpoint:", error);
+  }
+  return { hostname: "max.eu.14.mintservers.com", port: 25577 };
+}
+
+async function readMinecraftStatus(target) {
+  const socket = connect(target, { secureTransport: "off", allowHalfOpen: true });
+  let reader;
+  try {
+    await Promise.race([
+      socket.opened,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Minecraft connection timed out")), 5000))
+    ]);
+    reader = socket.readable.getReader();
+    const writer = socket.writable.getWriter();
+    const address = minecraftString("notesmp.de");
+    const handshakePayload = joinBytes(
+      encodeVarInt(0),
+      encodeVarInt(767),
+      address,
+      Uint8Array.of((target.port >> 8) & 255, target.port & 255),
+      encodeVarInt(1)
+    );
+    await writer.write(joinBytes(encodeVarInt(handshakePayload.length), handshakePayload, Uint8Array.of(1, 0)));
+    writer.releaseLock();
+
+    let buffer = new Uint8Array(0);
+    const readMore = async minimum => {
+      while (buffer.length < minimum) {
+        const result = await Promise.race([
+          reader.read(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Minecraft status response timed out")), 5000))
+        ]);
+        if (result.done) throw new Error("Minecraft server closed the status connection");
+        buffer = joinBytes(buffer, result.value);
+        if (buffer.length > 131072) throw new Error("Minecraft status response was too large");
+      }
+    };
+    const readVarIntFromStream = async () => {
+      let value = 0;
+      for (let index = 0; index < 5; index++) {
+        await readMore(1);
+        const byte = buffer[0];
+        buffer = buffer.slice(1);
+        value |= (byte & 0x7f) << (index * 7);
+        if (!(byte & 0x80)) return value >>> 0;
+      }
+      throw new Error("Invalid Minecraft response length");
+    };
+    const packetLength = await readVarIntFromStream();
+    await readMore(packetLength);
+    const packet = buffer.slice(0, packetLength);
+    const packetId = decodeVarInt(packet);
+    if (packetId.value !== 0) throw new Error("Unexpected Minecraft status packet");
+    const stringLength = decodeVarInt(packet, packetId.offset);
+    const jsonText = new TextDecoder().decode(packet.slice(stringLength.offset, stringLength.offset + stringLength.value));
+    const status = JSON.parse(jsonText);
+    return {
+      online: true,
+      playersOnline: Number(status.players?.online ?? 0),
+      maxPlayers: Number(status.players?.max ?? 0),
+      motd: status.description?.text || status.description || "",
+      version: status.version?.name || null,
+      onlinePlayers: Array.isArray(status.players?.sample)
+        ? status.players.sample.map(player => ({ name: player.name, uuid: player.id })).filter(player => player.name).slice(0, 200)
+        : [],
+      updatedAt: new Date().toISOString(),
+      source: "direct-minecraft-ping",
+      target: { hostname: target.hostname, port: target.port }
+    };
+  } finally {
+    try { reader?.releaseLock(); } catch {}
+    try { await socket.close(); } catch {}
+  }
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -111,82 +236,41 @@ export default {
       }
 
       if (request.method === "GET" && path === "/v1/server") {
-        // Never use a stored heartbeat as proof that the server is online.
-        // A failed or timed-out live ping must fail closed, otherwise stale ONLINE
-        // state can survive a server shutdown indefinitely.
+        // Ping the actual Minecraft TCP endpoint directly. Third-party status APIs
+        // cache responses for 1–5 minutes, so they cannot satisfy an explicit refresh.
         try {
-          const ping = await fetch("https://api.mcsrvstat.us/3/notesmp.de", {
-            headers: { Accept: "application/json", "User-Agent": "NoteSMP-Website/1.0 (https://www.notesmp.de)" },
-            signal: AbortSignal.timeout(10000),
-            cf: { cacheTtl: 0, cacheEverything: false }
-          });
-          if (!ping.ok) throw new Error("Status provider returned HTTP " + ping.status);
-          const status = await ping.json();
-          if (typeof status.online !== "boolean") throw new Error("Status provider returned an invalid response");
-          if (status.online && !status.motd?.raw && !status.motd?.clean) {
-            try {
-              const motdResponse = await fetch("https://api.mcstatus.io/v2/status/java/notesmp.de?query=false&timeout=6", {
-                headers: { Accept: "application/json", "User-Agent": "NoteSMP-Website/1.0 (https://www.notesmp.de)" },
-                signal: AbortSignal.timeout(8000)
-              });
-              if (motdResponse.ok) {
-                const alternate = await motdResponse.json();
-                if (alternate.online && alternate.motd) status.motd = alternate.motd;
-              }
-            } catch (error) {
-              console.warn("Secondary Minecraft MOTD lookup failed:", error);
-            }
-          }
-          const players = Array.isArray(status.players?.list)
-            ? status.players.list.map(p => typeof p === "string" ? { name: p } : p).slice(0, 200)
-            : [];
-          return json({
-            online: status.online,
-            playersOnline: status.online ? Number(status.players?.online || 0) : 0,
-            maxPlayers: Number(status.players?.max || 0),
-            motd: Array.isArray(status.motd?.raw) ? status.motd.raw.join("\n") : Array.isArray(status.motd?.clean) ? status.motd.clean.join("\n") : status.motd?.raw || status.motd?.clean || "",
-            version: status.version || null,
-            onlinePlayers: status.online ? players : [],
-            updatedAt: new Date().toISOString(),
-            source: "live-ping"
-          });
-        } catch (error) {
-          console.warn("Primary Minecraft status lookup failed; trying mcstatus.io:", error);
+          const target = await resolveMinecraftTarget();
+          return json(await readMinecraftStatus(target));
+        } catch (directError) {
+          console.warn("Direct Minecraft status ping failed; trying live status providers:", directError);
           try {
-            const fallback = await fetch("https://api.mcstatus.io/v2/status/java/notesmp.de?query=false&timeout=6", {
+            const response = await fetch("https://api.mcstatus.io/v2/status/java/notesmp.de:25577?query=false&timeout=6", {
               headers: { Accept: "application/json", "User-Agent": "NoteSMP-Website/1.0 (https://www.notesmp.de)" },
               signal: AbortSignal.timeout(8000)
             });
-            if (!fallback.ok) throw new Error("mcstatus.io returned HTTP " + fallback.status);
-            const status = await fallback.json();
+            if (!response.ok) throw new Error("mcstatus.io returned HTTP " + response.status);
+            const status = await response.json();
             if (typeof status.online !== "boolean") throw new Error("mcstatus.io returned an invalid response");
             const rawMotd = status.motd?.raw || status.motd?.clean || "";
-            const motd = Array.isArray(rawMotd) ? rawMotd.join("\n") : rawMotd;
-            const players = Array.isArray(status.players?.sample)
-              ? status.players.sample.map(p => ({ name: p.name_clean || p.name_raw || p.name, uuid: p.uuid })).filter(p => p.name).slice(0, 200)
-              : [];
+            const list = status.players?.list || status.players?.sample || [];
             return json({
               online: status.online,
               playersOnline: status.online ? Number(status.players?.online || 0) : 0,
               maxPlayers: Number(status.players?.max || 0),
-              motd,
-              version: status.version?.name_clean || status.version?.name_raw || null,
-              onlinePlayers: status.online ? players : [],
+              motd: Array.isArray(rawMotd) ? rawMotd.join("\\n") : rawMotd,
+              version: status.version?.name_clean || status.version?.name_raw || status.version?.name || null,
+              onlinePlayers: status.online && Array.isArray(list) ? list.map(player => ({ name: player.name_clean || player.name_raw || player.name, uuid: player.uuid || player.id })).filter(player => player.name).slice(0, 200) : [],
               updatedAt: new Date().toISOString(),
-              source: "mcstatus.io"
+              source: "mcstatus.io-fallback",
+              unavailable: false
             });
           } catch (fallbackError) {
-            console.warn("Both Minecraft status providers failed:", fallbackError);
+            console.warn("Live Minecraft status fallback failed:", fallbackError);
             return json({
-              online: false,
-              playersOnline: 0,
-              maxPlayers: 0,
-              motd: "",
-              version: null,
-              onlinePlayers: [],
-              updatedAt: new Date().toISOString(),
-              source: "ping-failed",
-              unavailable: true
+              online: false, playersOnline: 0, maxPlayers: 0, motd: "", version: null,
+              onlinePlayers: [], updatedAt: new Date().toISOString(),
+              source: "ping-failed", unavailable: true,
+              error: "The live Minecraft server could not be reached."
             });
           }
         }
