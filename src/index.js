@@ -256,7 +256,7 @@ export default {
         } catch (directError) {
           console.warn("Direct Minecraft status ping failed; trying live status providers:", directError);
           try {
-            const response = await fetch("https://api.mcstatus.io/v2/status/java/notesmp.de:25577?query=false&timeout=6", {
+            const response = await fetch("https://api.mcstatus.io/v2/status/java/${encodeURIComponent(target.hostname)}:${target.port}?query=false&timeout=6", {
               headers: { Accept: "application/json", "User-Agent": "NoteSMP-Website/1.0 (https://www.notesmp.de)" },
               signal: AbortSignal.timeout(8000)
             });
