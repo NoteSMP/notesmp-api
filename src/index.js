@@ -301,7 +301,7 @@ export default {
             number("playtime_seconds"),number("blocks_broken"),number("blocks_placed"),number("deaths"),number("kills")).run();
         const allowedStats = new Set(["mob_kills","player_kills","deaths","time_since_last_death","damage_absorbed","damage_dealt","damage_resisted","damage_taken","jumps","sneak_time","distance_climbed","distance_crouched","distance_fallen","distance_flown","distance_sprinted","distance_swum","distance_walked","distance_walked_under_water","distance_by_boat","distance_by_elytra","distance_by_happy_ghast","distance_by_horse","distance_by_minecart","blocks_placed","blocks_broken","fish_caught","animals_bred","chests_opened","barrels_opened","shulker_boxes_opened","items_dropped","items_enchanted","talked_to_villagers","traded_with_villagers","time_since_last_rest","times_slept_in_a_bed"]);
         const stats = payload.statistics && typeof payload.statistics === "object"
-          ? Object.entries(payload.statistics).filter(([statId,value]) => allowedStats.has(statId) && Number.isFinite(Number(value)) && Number(value) >= 0)
+          ? Object.entries(payload.statistics).filter(([statId,value]) => (allowedStats.has(statId) || /^minecraft:kill_entity:minecraft:[a-z0-9_.-]+$/i.test(statId)) && Number.isFinite(Number(value)) && Number(value) >= 0)
           : [];
         // Compare the incoming complete snapshot with D1 and write only actual differences.
         const existingResult = await env.DB.prepare("SELECT stat_id, stat_value FROM player_statistics WHERE minecraft_uuid=?").bind(uuid).all();
