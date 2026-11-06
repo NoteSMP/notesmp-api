@@ -487,6 +487,7 @@ export class LiveProfileChannel {
         baseStats: body.baseStats && typeof body.baseStats === "object" ? body.baseStats : {},
         firstJoin: typeof body.firstJoin === "string" ? body.firstJoin : null,
         lastSeen: typeof body.lastSeen === "string" ? body.lastSeen : null,
+        totalAdvancements: Number.isInteger(Number(body.totalAdvancements)) && Number(body.totalAdvancements) >= 0 ? Number(body.totalAdvancements) : null,
         receivedAt: new Date().toISOString()
       };
       await this.state.storage.put("response:" + body.requestId, result, { expirationTtl: 25 });
