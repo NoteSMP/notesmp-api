@@ -354,6 +354,11 @@ export default {
             icon: typeof item.icon === "string" ? item.icon.slice(0, 120) : null,
             earnedAt: typeof item.earnedAt === "string" ? item.earnedAt : new Date().toISOString()
           }));
+        // An empty plugin snapshot can mean the advancement file was unavailable or
+        // unreadable. Never erase a player's previously recorded unlocks on an empty response.
+        if (normalized.length === 0) {
+          return json({ ok: true, advancementsReceived: 0, advancementsChanged: 0, advancementsRemoved: 0, preservedExisting: true });
+        }
         const existingResult = await env.DB.prepare("SELECT advancement_id, advancement_title, icon_name, earned_at FROM player_advancements WHERE minecraft_uuid=?").bind(uuid).all();
         const existing = new Map((existingResult.results || []).map(row => [row.advancement_id, row]));
         const incoming = new Map(normalized.map(item => [item.id, item]));
