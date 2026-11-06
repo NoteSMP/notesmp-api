@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS server_metadata (
+  meta_key TEXT PRIMARY KEY,
+  meta_value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
