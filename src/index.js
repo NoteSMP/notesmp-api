@@ -120,7 +120,7 @@ async function readMinecraftStatus(target) {
       online: true,
       playersOnline: Number(status.players?.online ?? 0),
       maxPlayers: Number(status.players?.max ?? 0),
-      motd: minecraftComponentText(status.description),
+      motd: status.description,
       version: status.version?.name || null,
       onlinePlayers: Array.isArray(status.players?.sample)
         ? status.players.sample.map(player => ({ name: player.name, uuid: player.id })).filter(player => player.name).slice(0, 200)
