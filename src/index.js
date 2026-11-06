@@ -490,6 +490,8 @@ export class LiveProfileChannel {
         statistics: Array.isArray(body.statistics) ? body.statistics : [],
         advancements: Array.isArray(body.advancements) ? body.advancements.map(item => ({
           advancement_id: item.advancement_id || item.advancementId,
+          advancement_title: item.advancement_title || item.title || null,
+          icon_name: item.icon_name || item.icon || null,
           earned_at: item.earned_at || item.earnedAt || null
         })) : [],
         baseStats: body.baseStats && typeof body.baseStats === "object" ? body.baseStats : {},
