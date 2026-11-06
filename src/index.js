@@ -52,6 +52,18 @@ async function resolveMinecraftTarget() {
   return { hostname: "max.eu.14.mintservers.com", port: 25577 };
 }
 
+function minecraftComponentText(component) {
+  if (component == null) return "";
+  if (typeof component === "string" || typeof component === "number") return String(component);
+  if (Array.isArray(component)) return component.map(minecraftComponentText).join("");
+  if (typeof component !== "object") return "";
+  const ownText = typeof component.text === "string" ? component.text : "";
+  const translate = typeof component.translate === "string" ? component.translate : "";
+  const children = Array.isArray(component.extra) ? component.extra.map(minecraftComponentText).join("") : "";
+  const withArgs = Array.isArray(component.with) ? component.with.map(minecraftComponentText).join("") : "";
+  return ownText || translate || withArgs ? ownText + withArgs + children : children;
+}
+
 async function readMinecraftStatus(target) {
   const socket = connect(target, { secureTransport: "off", allowHalfOpen: true });
   let reader;
@@ -108,7 +120,7 @@ async function readMinecraftStatus(target) {
       online: true,
       playersOnline: Number(status.players?.online ?? 0),
       maxPlayers: Number(status.players?.max ?? 0),
-      motd: status.description?.text || status.description || "",
+      motd: minecraftComponentText(status.description),
       version: status.version?.name || null,
       onlinePlayers: Array.isArray(status.players?.sample)
         ? status.players.sample.map(player => ({ name: player.name, uuid: player.id })).filter(player => player.name).slice(0, 200)
@@ -257,7 +269,7 @@ export default {
               online: status.online,
               playersOnline: status.online ? Number(status.players?.online || 0) : 0,
               maxPlayers: Number(status.players?.max || 0),
-              motd: Array.isArray(rawMotd) ? rawMotd.join("\\n") : rawMotd,
+              motd: Array.isArray(rawMotd) ? rawMotd.join("\n") : (typeof rawMotd === "string" ? rawMotd : minecraftComponentText(status.motd?.raw || status.motd?.clean || status.motd || "")),
               version: status.version?.name_clean || status.version?.name_raw || status.version?.name || null,
               onlinePlayers: status.online && Array.isArray(list) ? list.map(player => ({ name: player.name_clean || player.name_raw || player.name, uuid: player.uuid || player.id })).filter(player => player.name).slice(0, 200) : [],
               updatedAt: new Date().toISOString(),
