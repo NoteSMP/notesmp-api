@@ -445,6 +445,19 @@ export default {
         return new Response(response.body, { status: response.status, headers: { ...corsHeaders, "Content-Type": "application/json", "Cache-Control": "no-store" } });
       }
 
+      if (request.method === "POST" && path === "/v1/minecraft/player-join") {
+        if (!requireServerKey(request, env)) return unauthorized();
+        let body; try { body = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
+        const uuid = typeof body.uuid === "string" ? body.uuid.toLowerCase() : "";
+        const username = typeof body.username === "string" ? body.username.slice(0, 16) : "";
+        const firstJoin = typeof body.firstJoin === "string" ? body.firstJoin : new Date().toISOString();
+        const lastSeen = typeof body.lastSeen === "string" ? body.lastSeen : new Date().toISOString();
+        if (!/^[0-9a-f-]{36}$/.test(uuid) || !/^[A-Za-z0-9_]{3,16}$/.test(username))
+          return json({ error: "Invalid player identity" }, 400);
+        await env.DB.prepare("INSERT INTO players (uuid, username, first_join, last_seen, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(uuid) DO UPDATE SET username=excluded.username, first_join=COALESCE(players.first_join, excluded.first_join), last_seen=excluded.last_seen, updated_at=CURRENT_TIMESTAMP")
+          .bind(uuid, username, firstJoin, lastSeen).run();
+        return json({ ok: true, registered: true });
+      }
       if (request.method === "POST" && path === "/v1/minecraft/status-refresh") {
         if (!requireServerKey(request, env)) return unauthorized();
         if (env.LIVE_PROFILES) {
