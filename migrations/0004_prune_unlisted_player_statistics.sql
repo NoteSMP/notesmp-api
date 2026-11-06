@@ -1,6 +1,7 @@
 -- Keep only statistic keys currently rendered by the NoteSMP website.
 DELETE FROM player_statistics
-WHERE stat_id NOT IN (
+WHERE stat_id NOT LIKE 'minecraft:kill_entity:%'
+  AND stat_id NOT IN (
   'mob_kills','player_kills','deaths','time_since_last_death',
   'damage_absorbed','damage_dealt','damage_resisted','damage_taken',
   'jumps','sneak_time','distance_climbed','distance_crouched','distance_fallen',
