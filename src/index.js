@@ -153,6 +153,96 @@ function unauthorized() {
   return json({ error: "Unauthorized" }, 401);
 }
 
+const MOB_KILL_ENTITY_IDS = new Set([
+  "allay",
+  "armadillo",
+  "axolotl",
+  "bat",
+  "bee",
+  "blaze",
+  "bogged",
+  "breeze",
+  "camel",
+  "camel_husk",
+  "cat",
+  "cave_spider",
+  "chicken",
+  "cod",
+  "copper_golem",
+  "cow",
+  "creeper",
+  "dolphin",
+  "donkey",
+  "drowned",
+  "elder_guardian",
+  "ender_dragon",
+  "enderman",
+  "endermite",
+  "evoker",
+  "fox",
+  "frog",
+  "ghast",
+  "giant",
+  "glow_squid",
+  "goat",
+  "guardian",
+  "happy_ghast",
+  "hoglin",
+  "horse",
+  "husk",
+  "iron_golem",
+  "llama",
+  "magma_cube",
+  "mooshroom",
+  "mule",
+  "nautilus",
+  "ocelot",
+  "panda",
+  "parched",
+  "parrot",
+  "phantom",
+  "pig",
+  "piglin",
+  "piglin_brute",
+  "pillager",
+  "polar_bear",
+  "pufferfish",
+  "rabbit",
+  "ravager",
+  "salmon",
+  "sheep",
+  "shulker",
+  "silverfish",
+  "skeleton",
+  "skeleton_horse",
+  "slime",
+  "sniffer",
+  "snow_golem",
+  "spider",
+  "squid",
+  "stray",
+  "strider",
+  "tadpole",
+  "trader_llama",
+  "tropical_fish",
+  "turtle",
+  "vex",
+  "villager",
+  "vindicator",
+  "wandering_trader",
+  "warden",
+  "witch",
+  "wither",
+  "wither_skeleton",
+  "wolf",
+  "zoglin",
+  "zombie",
+  "zombie_horse",
+  "zombie_nautilus",
+  "zombie_villager",
+  "zombified_piglin"
+]);
+
 function requireServerKey(request, env) {
   const header = request.headers.get("Authorization") || "";
   return Boolean(env.MINECRAFT_API_KEY) && header === `Bearer ${env.MINECRAFT_API_KEY}`;
@@ -173,6 +263,27 @@ export default {
         return json({ ok: true, service: "notesmp-api", database: "connected" });
       }
 
+
+      if (request.method === "POST" && path === "/v1/minecraft/playerdata/wipe") {
+        if (!requireServerKey(request, env)) return unauthorized();
+        const counts = {};
+        for (const [table, column] of [
+          ["players", "uuid"],
+          ["player_statistics", "minecraft_uuid"],
+          ["player_advancements", "minecraft_uuid"],
+          ["stats_refresh_queue", "uuid"]
+        ]) {
+          const row = await env.DB.prepare("SELECT COUNT(*) AS count FROM " + table).first();
+          counts[table] = Number(row?.count || 0);
+        }
+        await env.DB.batch([
+          env.DB.prepare("DELETE FROM player_statistics"),
+          env.DB.prepare("DELETE FROM player_advancements"),
+          env.DB.prepare("DELETE FROM stats_refresh_queue"),
+          env.DB.prepare("DELETE FROM players")
+        ]);
+        return json({ ok: true, wiped: counts, scope: "playerdata-only" });
+      }
 
       if (request.method === "GET" && path === "/v1/content/posts") {
         await env.DB.prepare("DELETE FROM published_posts WHERE category='news' AND json_extract(event_data_json,'$.type')='maintenance' AND julianday(json_extract(event_data_json,'$.expiryAt')) <= julianday('now')").run();
@@ -397,14 +508,17 @@ export default {
             number("playtime_seconds"),number("blocks_broken"),number("blocks_placed"),number("deaths"),number("kills")).run();
         const allowedStats = new Set(["mob_kills","player_kills","deaths","time_since_last_death","damage_absorbed","damage_dealt","damage_resisted","damage_taken","jumps","sneak_time","distance_climbed","distance_crouched","distance_fallen","distance_flown","distance_sprinted","distance_swum","distance_walked","distance_walked_under_water","distance_by_boat","distance_by_elytra","distance_by_happy_ghast","distance_by_horse","distance_by_minecart","blocks_placed","blocks_broken","fish_caught","animals_bred","chests_opened","barrels_opened","shulker_boxes_opened","items_dropped","items_enchanted","talked_to_villagers","traded_with_villagers","time_since_last_rest","times_slept_in_a_bed"]);
         const stats = payload.statistics && typeof payload.statistics === "object"
-          ? Object.entries(payload.statistics).filter(([statId,value]) => (allowedStats.has(statId) || /^minecraft:kill_entity:minecraft:[a-z0-9_.-]+$/i.test(statId)) && Number.isFinite(Number(value)) && Number(value) >= 0)
+          ? Object.entries(payload.statistics).filter(([statId,value]) => (allowedStats.has(statId) || (statId.startsWith("minecraft:kill_entity:minecraft:") && MOB_KILL_ENTITY_IDS.has(statId.slice("minecraft:kill_entity:minecraft:".length).toLowerCase()))) && Number.isFinite(Number(value)) && Number(value) >= 0)
           : [];
         // Compare the incoming complete snapshot with D1 and write only actual differences.
         const existingResult = await env.DB.prepare("SELECT stat_id, stat_value FROM player_statistics WHERE minecraft_uuid=?").bind(uuid).all();
         const existing = new Map((existingResult.results || []).map(row => [row.stat_id, Number(row.stat_value)]));
         const incoming = new Map(stats.map(([statId, value]) => [statId, Number(value)]));
         const changed = stats.filter(([statId, value]) => !existing.has(statId) || existing.get(statId) !== Number(value));
-        const removed = [...existing.keys()].filter(statId => !incoming.has(statId));
+        const removed = [...existing.keys()].filter(statId =>
+          !incoming.has(statId) || (statId.startsWith("minecraft:kill_entity:minecraft:")
+            && !MOB_KILL_ENTITY_IDS.has(statId.slice("minecraft:kill_entity:minecraft:".length).toLowerCase()))
+        );
         const statements = changed.map(([statId,value]) =>
           env.DB.prepare("INSERT INTO player_statistics(minecraft_uuid,stat_id,stat_value) VALUES(?,?,?) ON CONFLICT(minecraft_uuid,stat_id) DO UPDATE SET stat_value=excluded.stat_value,updated_at=CURRENT_TIMESTAMP")
             .bind(uuid,statId,Number(value)));
