@@ -300,7 +300,7 @@ export default {
         } else if (category === "gallery" && url.searchParams.get("builder")) {
           const builder = url.searchParams.get("builder").trim().slice(0, 16);
           const builderLimit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 100, 1), 1000);
-          result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='gallery' AND lower(COALESCE(linked_minecraft_name,'')) LIKE '%' || lower(?) || '%' ORDER BY published_at DESC LIMIT ?").bind(builder, builderLimit).all();
+          result = await env.DB.prepare("SELECT six_digit_id,category,group_name,title,subtitle,body,image_urls_json,event_data_json,linked_minecraft_name,published_at,updated_at FROM published_posts WHERE category='gallery' AND (lower(COALESCE(linked_minecraft_name,'')) = lower(?) OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(json_extract(event_data_json,'$.builders')) THEN json_extract(event_data_json,'$.builders') ELSE '[]' END) AS builder_entry WHERE lower(CAST(builder_entry.value AS TEXT)) = lower(?))) ORDER BY published_at DESC LIMIT ?").bind(builder, builder, builderLimit).all();
         } else if (category === "gallery" && url.searchParams.get("group")) {
           // Gallery groups are strictly gallery records. Never mix Discord calendar events
           // into the Gallery tab, even when the selected gallery group is named "Events".
@@ -331,7 +331,7 @@ export default {
           let images=[]; let event=null;
           try { images=JSON.parse(row.image_urls_json || "[]"); } catch {}
           try { event=row.event_data_json ? JSON.parse(row.event_data_json) : null; } catch {}
-          return { id:row.six_digit_id,category:row.category === "gallery" ? row.group_name : row.category,group:row.group_name,title:row.title,subtitle:row.subtitle,body:row.body,images,event,dimension:event?.dimension || null,coordinates:event?.coordinates || null,authorMinecraftName:row.linked_minecraft_name,publishedAt:row.published_at,updatedAt:row.updated_at };
+          return { id:row.six_digit_id,category:row.category === "gallery" ? row.group_name : row.category,group:row.group_name,title:row.title,subtitle:row.subtitle,body:row.body,images,event,builders:Array.isArray(event?.builders) ? event.builders : [],dimension:event?.dimension || null,coordinates:event?.coordinates || null,authorMinecraftName:row.linked_minecraft_name,publishedAt:row.published_at,updatedAt:row.updated_at };
         });
         return json({posts});
       }
@@ -343,7 +343,7 @@ export default {
         let images=[]; let event=null;
         try { images=JSON.parse(row.image_urls_json || "[]"); } catch {}
         try { event=row.event_data_json ? JSON.parse(row.event_data_json) : null; } catch {}
-        return json({post:{id:row.six_digit_id,category:row.category === "gallery" ? row.group_name : row.category,group:row.group_name,title:row.title,subtitle:row.subtitle,body:row.body,images,event,dimension:event?.dimension || null,coordinates:event?.coordinates || null,authorMinecraftName:row.linked_minecraft_name,publishedAt:row.published_at,updatedAt:row.updated_at}});
+        return json({post:{id:row.six_digit_id,category:row.category === "gallery" ? row.group_name : row.category,group:row.group_name,title:row.title,subtitle:row.subtitle,body:row.body,images,event,builders:Array.isArray(event?.builders) ? event.builders : [],dimension:event?.dimension || null,coordinates:event?.coordinates || null,authorMinecraftName:row.linked_minecraft_name,publishedAt:row.published_at,updatedAt:row.updated_at}});
       }
 
       if (request.method === "GET" && path === "/v1/content/hero") {
