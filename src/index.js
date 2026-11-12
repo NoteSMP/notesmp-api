@@ -374,7 +374,11 @@ export default {
           });
         }
         try {
-          return json(await readMinecraftStatus(target));
+          const status = await readMinecraftStatus(target);
+          const hiddenNames = await env.DB.prepare("SELECT lower(username) AS username FROM hidden_players WHERE username IS NOT NULL").all();
+          const hiddenSet = new Set((hiddenNames.results || []).map(row => row.username));
+          status.onlinePlayers = (status.onlinePlayers || []).filter(player => !hiddenSet.has(String(player.name || "").toLowerCase()));
+          return json(status);
         } catch (directError) {
           console.warn("Direct Minecraft status ping failed; trying live status providers:", directError);
           try {
@@ -413,7 +417,7 @@ export default {
       if (request.method === "GET" && path === "/v1/players") {
         const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 100);
         const result = await env.DB.prepare(
-          "SELECT uuid, username, first_join, last_seen, playtime_seconds, blocks_broken, blocks_placed, deaths, kills, updated_at FROM players ORDER BY playtime_seconds DESC LIMIT ?"
+          "SELECT p.uuid, p.username, p.first_join, p.last_seen, p.playtime_seconds, p.blocks_broken, p.blocks_placed, p.deaths, p.kills, p.updated_at FROM players p LEFT JOIN hidden_players h ON h.uuid=p.uuid WHERE h.uuid IS NULL ORDER BY p.playtime_seconds DESC LIMIT ?"
         ).bind(limit).all();
         return json({ players: result.results || [] });
       }
@@ -421,7 +425,7 @@ export default {
       const playerMatch = path.match(/^\/v1\/players\/([0-9a-fA-F-]{36})$/);
       if (request.method === "GET" && playerMatch) {
         const player = await env.DB.prepare(
-          "SELECT uuid, username, first_join, last_seen, playtime_seconds, blocks_broken, blocks_placed, deaths, kills, updated_at FROM players WHERE uuid = ?"
+          "SELECT p.uuid, p.username, p.first_join, p.last_seen, p.playtime_seconds, p.blocks_broken, p.blocks_placed, p.deaths, p.kills, p.updated_at FROM players p LEFT JOIN hidden_players h ON h.uuid=p.uuid WHERE p.uuid = ? AND h.uuid IS NULL"
         ).bind(playerMatch[1]).first();
         return player ? json({ player }) : json({ error: "Player not found" }, 404);
       }
@@ -429,7 +433,7 @@ export default {
       const liveProfileMatch = path.match(/^\/v1\/players\/([0-9a-fA-F-]{36})\/live$/);
       if (request.method === "GET" && liveProfileMatch) {
         const uuid = liveProfileMatch[1].toLowerCase();
-        const player = await env.DB.prepare("SELECT username FROM players WHERE uuid=?").bind(uuid).first();
+        const player = await env.DB.prepare("SELECT p.username FROM players p LEFT JOIN hidden_players h ON h.uuid=p.uuid WHERE p.uuid=? AND h.uuid IS NULL").bind(uuid).first();
         if (!player?.username) return json({ error: "Player not found" }, 404);
         if (!env.LIVE_PROFILES) return json({ error: "Live profile channel is not configured" }, 503);
         const id = env.LIVE_PROFILES.idFromName("notesmp-live-profiles");
@@ -506,6 +510,8 @@ export default {
 
       const advancementsMatch = path.match(/^\/v1\/players\/([0-9a-fA-F-]{36})\/advancements$/);
       if (request.method === "GET" && advancementsMatch) {
+        const visiblePlayer = await env.DB.prepare("SELECT p.uuid FROM players p LEFT JOIN hidden_players h ON h.uuid=p.uuid WHERE p.uuid=? AND h.uuid IS NULL").bind(advancementsMatch[1].toLowerCase()).first();
+        if (!visiblePlayer) return json({ error: "Player not found" }, 404);
         const result = await env.DB.prepare("SELECT advancement_id, advancement_title, icon_name, earned_at FROM player_advancements WHERE minecraft_uuid = ? AND advancement_id NOT LIKE 'minecraft:recipes/%' ORDER BY earned_at DESC, advancement_id").bind(advancementsMatch[1].toLowerCase()).all();
         return json({ advancements: result.results || [] });
       }
@@ -556,7 +562,9 @@ export default {
 
       const statsMatch = path.match(/^\/v1\/players\/([0-9a-fA-F-]{36})\/statistics$/);
       if (request.method === "GET" && statsMatch) {
-        const uuid = statsMatch[1];
+        const uuid = statsMatch[1].toLowerCase();
+        const visiblePlayer = await env.DB.prepare("SELECT p.username FROM players p LEFT JOIN hidden_players h ON h.uuid=p.uuid WHERE p.uuid=? AND h.uuid IS NULL").bind(uuid).first();
+        if (!visiblePlayer) return json({ error: "Player not found" }, 404);
         if (url.searchParams.get("refresh") === "1") {
           const player = await env.DB.prepare("SELECT username FROM players WHERE uuid=?").bind(uuid).first();
           if (player?.username) {
