@@ -1,5 +1,9 @@
 import { connect } from "cloudflare:sockets";
 
+function isRecipeAdvancementId(value) {
+  return typeof value === "string" && /^[a-z0-9_.-]+:recipes\//i.test(value);
+}
+
 function encodeVarInt(value) {
   const bytes = [];
   let n = value >>> 0;
@@ -596,7 +600,7 @@ export default {
         const advancements = Array.isArray(body.advancements) ? body.advancements.slice(0, 5000) : [];
         if (!/^[0-9a-fA-F-]{36}$/.test(uuid) || !username) return json({ error: "Invalid advancement payload" }, 400);
         // Treat the payload as a complete snapshot, but only mutate D1 rows that differ.
-        const normalized = advancements.filter(item => item && typeof item.advancementId === "string" && item.advancementId.length <= 180)
+        const normalized = advancements.filter(item => item && typeof item.advancementId === "string" && item.advancementId.length <= 180 && !isRecipeAdvancementId(item.advancementId))
           .map(item => ({
             id: item.advancementId,
             title: typeof item.title === "string" ? item.title.slice(0, 180) : item.advancementId,
@@ -637,6 +641,7 @@ export default {
         const icon = typeof body.icon === "string" ? body.icon.slice(0, 120) : null;
         const earnedAt = typeof body.earnedAt === "string" ? body.earnedAt : new Date().toISOString();
         if (!/^[0-9a-fA-F-]{36}$/.test(uuid) || !username || !advancementId) return json({ error: "Invalid advancement payload" }, 400);
+        if (isRecipeAdvancementId(advancementId)) return json({ ok: true, ignored: true, reason: "recipe-advancement" });
         await env.DB.prepare("INSERT INTO players (uuid, username, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(uuid) DO UPDATE SET username=excluded.username, updated_at=CURRENT_TIMESTAMP").bind(uuid, username).run();
         await env.DB.prepare("INSERT INTO player_advancements (minecraft_uuid, advancement_id, advancement_title, icon_name, earned_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(minecraft_uuid, advancement_id) DO UPDATE SET advancement_title=excluded.advancement_title, icon_name=excluded.icon_name, earned_at=excluded.earned_at").bind(uuid, advancementId, title, icon, earnedAt).run();
         return json({ ok: true });
@@ -737,7 +742,7 @@ export class LiveProfileChannel {
       const result = {
         uuid: pending.uuid, username: pending.username,
         statistics: Array.isArray(body.statistics) ? body.statistics : [],
-        advancements: Array.isArray(body.advancements) ? body.advancements.map(item => ({
+        advancements: Array.isArray(body.advancements) ? body.advancements.filter(item => !isRecipeAdvancementId(item?.advancement_id || item?.advancementId || "")).map(item => ({
           advancement_id: item.advancement_id || item.advancementId,
           advancement_title: item.advancement_title || item.title || null,
           icon_name: item.icon_name || item.icon || null,
