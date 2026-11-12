@@ -375,9 +375,13 @@ export default {
         }
         try {
           const status = await readMinecraftStatus(target);
-          const hiddenNames = await env.DB.prepare("SELECT lower(username) AS username FROM hidden_players WHERE username IS NOT NULL").all();
-          const hiddenSet = new Set((hiddenNames.results || []).map(row => row.username));
-          status.onlinePlayers = (status.onlinePlayers || []).filter(player => !hiddenSet.has(String(player.name || "").toLowerCase()));
+          const hiddenRows = await env.DB.prepare("SELECT lower(username) AS username, lower(uuid) AS uuid FROM hidden_players").all();
+          const hiddenNames = new Set((hiddenRows.results || []).map(row => row.username).filter(Boolean));
+          const hiddenUuids = new Set((hiddenRows.results || []).map(row => row.uuid).filter(Boolean));
+          status.onlinePlayers = (status.onlinePlayers || []).filter(player =>
+            !hiddenNames.has(String(player.name || "").toLowerCase()) &&
+            !hiddenUuids.has(String(player.uuid || "").toLowerCase())
+          );
           return json(status);
         } catch (directError) {
           console.warn("Direct Minecraft status ping failed; trying live status providers:", directError);
@@ -391,13 +395,16 @@ export default {
             if (typeof status.online !== "boolean") throw new Error("mcstatus.io returned an invalid response");
             const rawMotd = status.motd?.raw || status.motd?.clean || "";
             const list = status.players?.list || status.players?.sample || [];
+            const hiddenRows = await env.DB.prepare("SELECT lower(username) AS username, lower(uuid) AS uuid FROM hidden_players").all();
+            const hiddenNames = new Set((hiddenRows.results || []).map(row => row.username).filter(Boolean));
+            const hiddenUuids = new Set((hiddenRows.results || []).map(row => row.uuid).filter(Boolean));
             return json({
               online: status.online,
               playersOnline: status.online ? Number(status.players?.online || 0) : 0,
               maxPlayers: Number(status.players?.max || 0),
               motd: Array.isArray(rawMotd) ? rawMotd.join("\n") : (typeof rawMotd === "string" ? rawMotd : minecraftComponentText(status.motd?.raw || status.motd?.clean || status.motd || "")),
               version: status.version?.name_clean || status.version?.name_raw || status.version?.name || null,
-              onlinePlayers: status.online && Array.isArray(list) ? list.map(player => ({ name: player.name_clean || player.name_raw || player.name, uuid: player.uuid || player.id })).filter(player => player.name).slice(0, 200) : [],
+              onlinePlayers: status.online && Array.isArray(list) ? list.map(player => ({ name: player.name_clean || player.name_raw || player.name, uuid: player.uuid || player.id })).filter(player => player.name && !hiddenNames.has(String(player.name).toLowerCase()) && !hiddenUuids.has(String(player.uuid || "").toLowerCase())).slice(0, 200) : [],
               updatedAt: new Date().toISOString(),
               source: "mcstatus.io-fallback",
               unavailable: false
