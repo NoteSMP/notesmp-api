@@ -289,6 +289,30 @@ export default {
         return json({ ok: true, wiped: counts, scope: "playerdata-only" });
       }
 
+      const playerWipeMatch = path.match(/^\\/v1\\/minecraft\\/playerdata\\/wipe\\/([0-9a-fA-F-]{36})$/);
+      if (request.method === "POST" && playerWipeMatch) {
+        if (!requireServerKey(request, env)) return unauthorized();
+        const uuid = playerWipeMatch[1].toLowerCase();
+        const player = await env.DB.prepare("SELECT uuid, username FROM players WHERE uuid=?").bind(uuid).first();
+        if (!player) return json({ error: "Player not found" }, 404);
+        const counts = {};
+        for (const [table, column] of [
+          ["player_statistics", "minecraft_uuid"],
+          ["player_advancements", "minecraft_uuid"],
+          ["stats_refresh_queue", "uuid"]
+        ]) {
+          const row = await env.DB.prepare("SELECT COUNT(*) AS count FROM " + table + " WHERE " + column + "=?").bind(uuid).first();
+          counts[table] = Number(row?.count || 0);
+        }
+        await env.DB.batch([
+          env.DB.prepare("DELETE FROM player_statistics WHERE minecraft_uuid=?").bind(uuid),
+          env.DB.prepare("DELETE FROM player_advancements WHERE minecraft_uuid=?").bind(uuid),
+          env.DB.prepare("DELETE FROM stats_refresh_queue WHERE uuid=?").bind(uuid),
+          env.DB.prepare("DELETE FROM players WHERE uuid=?").bind(uuid)
+        ]);
+        return json({ ok: true, player: player.username, wiped: counts, scope: "playerdata-only" });
+      }
+
       if (request.method === "GET" && path === "/v1/content/posts") {
         await env.DB.prepare("DELETE FROM published_posts WHERE category='news' AND json_extract(event_data_json,'$.type')='maintenance' AND julianday(json_extract(event_data_json,'$.expiryAt')) <= julianday('now')").run();
         const category = url.searchParams.get("category");
