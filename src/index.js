@@ -289,7 +289,7 @@ export default {
         return json({ ok: true, wiped: counts, scope: "playerdata-only" });
       }
 
-      const playerWipeMatch = path.match(/^\\/v1\\/minecraft\\/playerdata\\/wipe\\/([0-9a-fA-F-]{36})$/);
+      const playerWipeMatch = path.match(/^\/v1\/minecraft\/playerdata\/wipe\/([0-9a-fA-F-]{36})$/);
       if (request.method === "POST" && playerWipeMatch) {
         if (!requireServerKey(request, env)) return unauthorized();
         const uuid = playerWipeMatch[1].toLowerCase();
