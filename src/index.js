@@ -294,7 +294,6 @@ export default {
         if (!requireServerKey(request, env)) return unauthorized();
         const uuid = playerWipeMatch[1].toLowerCase();
         const player = await env.DB.prepare("SELECT uuid, username FROM players WHERE uuid=?").bind(uuid).first();
-        if (!player) return json({ error: "Player not found" }, 404);
         const counts = {};
         for (const [table, column] of [
           ["player_statistics", "minecraft_uuid"],
@@ -310,7 +309,7 @@ export default {
           env.DB.prepare("DELETE FROM stats_refresh_queue WHERE uuid=?").bind(uuid),
           env.DB.prepare("DELETE FROM players WHERE uuid=?").bind(uuid)
         ]);
-        return json({ ok: true, player: player.username, wiped: counts, scope: "playerdata-only" });
+        return json({ ok: true, player: player?.username || uuid, wiped: counts, scope: "playerdata-only" });
       }
 
       if (request.method === "GET" && path === "/v1/content/posts") {
